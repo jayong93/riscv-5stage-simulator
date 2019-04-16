@@ -12,10 +12,10 @@ pub mod memory;
 pub mod pipeline;
 pub mod register;
 pub mod stages;
-pub mod elf;
 
 #[macro_use]
 extern crate log;
 extern crate goblin;
 extern crate regex;
 extern crate byteorder;
+extern crate num_traits;
