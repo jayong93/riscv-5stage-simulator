@@ -38,7 +38,6 @@ impl RawSection {
         let start_addr = (addr - self.range.start) as usize;
         let mut num = &mut self.data[(start_addr..start_addr+4)];
         num.write_f32::<LittleEndian>(value).unwrap();
-        unimplemented!()
     }
 
     pub fn write_int<T: num_traits::PrimInt>(&mut self, addr: u32, value: T) {
@@ -85,6 +84,8 @@ impl Section {
 
 pub struct ProcessMemory {
     sections: Vec<Section>,
+    entry_point: u32,
+    // Stack 자료구조 추가
 }
 
 impl ProcessMemory {
@@ -128,7 +129,7 @@ impl ProcessMemory {
                 }
             })
             .collect();
-        ProcessMemory { sections }
+        ProcessMemory { sections, entry_point: elf.entry as u32 }
     }
 
     pub fn read_int<T: num_traits::PrimInt>(&self, addr: u32) -> T {
