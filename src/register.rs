@@ -8,6 +8,7 @@
 pub struct RegisterFile {
     pub pc: Register,
     pub gpr: [Register; 32],
+    pub fpr: [Register; 32],
 }
 
 
