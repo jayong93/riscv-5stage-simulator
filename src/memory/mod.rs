@@ -17,10 +17,44 @@ pub struct InstructionMemory {
     entry_point: u32,
 }
 
+impl InstructionMemory {
+    pub fn read(&self, addr: u32) -> u32 {
+        if addr < self.v_address_range.0 || addr >= self.v_address_range.1 {
+            panic!("{} is out of instruction address range.", addr);
+        }
+        let offset = (addr - self.v_address_range.0) as usize;
+        let mut data = &(self.data[offset..offset+4]);
+        data.read_u32::<LittleEndian>().expect("Can't read memory as u32 instruction")
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DataMemory {
     v_address_range: (u32, u32),
     data: Vec<u8>,
+}
+
+impl DataMemory {
+    pub fn read_int<T: ReadBytesExt + num_traits::PrimInt + num_traits::FromPrimitive>(&self, addr: u32) -> T {
+        if addr < self.v_address_range.0 || addr >= self.v_address_range.1 {
+            panic!("{} is out of data address range.", addr);
+        }
+        
+        let offset = (addr - self.v_address_range.0) as usize;
+        let data_size = size_of::<T>() as usize;
+        let mut data = &(self.data[offset..offset+data_size]);
+        let val = data.read_uint::<LittleEndian>(data_size).expect("Can't read a memory as u64");
+        T::from_u64(val).unwrap()
+    }
+
+    pub fn read_float(&self, addr: u32) -> f32 {
+        if addr < self.v_address_range.0 || addr >= self.v_address_range.1 {
+            panic!("{} is out of data address range.", addr);
+        }
+        let offset = (addr - self.v_address_range.0) as usize;
+        let mut data = &(self.data[offset..offset+4]);
+        data.read_f32::<LittleEndian>().expect("Can't read a memory as u64")
+    }
 }
 
 pub fn get_image_from_elf(elf: &[u8]) -> (InstructionMemory, DataMemory) {
@@ -84,6 +118,7 @@ mod tests {
         assert_eq!(inst_image.v_address_range.1, 0x10000 + 0x6dd46);
         assert_eq!(inst_image.entry_point, 0x10338);
         assert_eq!(inst_image.data.len(), 0x6dd46);
+        assert_eq!(inst_image.read(inst_image.entry_point), 0x034000ef);
         assert_eq!(data_image.v_address_range.0, 0x7fd08);
         assert_eq!(data_image.v_address_range.1, 0x7fd08 + 0x1e0c);
         assert_eq!(data_image.data.len(), 0x1e0c);
