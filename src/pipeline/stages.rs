@@ -4,8 +4,7 @@
 use consts;
 use hazards;
 use instruction::{Function, Instruction, Opcode};
-use memory::data::DataMemory;
-use memory::instruction::InstructionMemory;
+use memory::ProcessMemory;
 use pipeline::Pipeline;
 use register::RegisterFile;
 use stages;

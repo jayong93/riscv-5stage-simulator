@@ -1,100 +1,52 @@
 //! Arithmetic logic unit.
 
-
-use instruction::Instruction;
-
+use pipeline;
 
 /// Perform one ALU operation.
-pub fn alu(insn: &Instruction, src1: i32, src2: i32, _clk: u64) -> i32 {
-    use self::AluOp::*;
+pub fn alu(pipeline_reg: &pipeline::IdExRegister) -> i32 {
+    use instruction::Function::*;
+    let (src1, src2) = (pipeline_reg.rs1, pipeline_reg.rs2);
 
-    let (value, overflow) = match insn.semantics.alu_op {
-        Add => src1.overflowing_add(src2),
-        Sub => src1.overflowing_sub(src2),
-        And => (src1 & src2, false),
-        Or => (src1 | src2, false),
-        Xor => (src1 ^ src2, false),
-        BranchOnEqual => (!(src1 == src2) as i32, false),
-        BranchOnNotEqual => (!(src1 != src2) as i32, false),
-        BranchOnLessThan => (!(src1 < src2) as i32, false),
-        BranchOnLessThanUnsigned => (
-            !((src1 as u32) < (src2 as u32)) as i32,
-            false,
-        ),
-        BranchOnGreaterOrEqual => (!(src1 >= src2) as i32, false),
-        BranchOnGreaterOrEqualUnsigned => (
-            !((src1 as u32) >= (src2 as u32)) as
-                i32,
-            false,
-        ),
-        ShiftLeft => (src1 << src2, false),
-        ShiftRightLogical => (((src1 as u32) >> src2) as i32, false),
-        ShiftRightArithmetic => src1.overflowing_shr(src2 as u32),
-        SetOnLessThan => ((src1 < src2) as i32, false),
-        SetOnLessThanUnsigned => (
-            ((src1 as u32) < (src2 as u32)) as i32,
-            false,
-        ),
-    };
-
-    if overflow {
-        debug!(
-            "Detected overflow {} {:?} {} (clock {})",
-            src1,
-            insn.semantics.alu_op,
-            src2,
-            _clk
-        );
-    }
-
-    value
-}
-
-
-/// Available ALU operations.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AluOp {
-    // Arithmetic ops
-    Add,
-    Sub,
-    // Logical ops
-    And,
-    Or,
-    Xor,
-    // Sets
-    SetOnLessThan,
-    SetOnLessThanUnsigned,
-    // Shifts
-    ShiftLeft,
-    ShiftRightLogical,
-    ShiftRightArithmetic,
-    // Branches
-    BranchOnEqual,
-    BranchOnNotEqual,
-    BranchOnLessThan,
-    BranchOnLessThanUnsigned,
-    BranchOnGreaterOrEqual,
-    BranchOnGreaterOrEqualUnsigned,
-}
-
-
-impl Default for AluOp {
-    fn default() -> AluOp {
-        AluOp::Add
-    }
-}
-
-
-/// Selector for ALU `src2` source.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AluSrc {
-    Reg,
-    Imm,
-}
-
-
-impl Default for AluSrc {
-    fn default() -> AluSrc {
-        AluSrc::Reg
+    match pipeline_reg.insn.function {
+        Add | Addi => src1 + src2,
+        Subi => src1 - src2,
+        Slt | Slti => {
+            if src1 < src2 {
+                1
+            } else {
+                0
+            }
+        }
+        Sltu | Sltiu => {
+            if (src1 as u32) < (src2 as u32) {
+                1
+            } else {
+                0
+            }
+        }
+        And | Andi => src1 & src2,
+        Or | Ori => src1 | src2,
+        Xor | Xori => src1 ^ src2,
+        Sll | Slli => ((src1 as u32) << (src2 as u32)) as i32,
+        Srl | Srli => ((src1 as u32) >> (src2 as u32)) as i32,
+        Sra | Srai => src1 >> src2,
+        Lui => src2,
+        AuiPc => pipeline_reg.pc as i32 + src2,
+        Jalr | Jal => pipeline_reg.pc as i32 + 4,
+        Beq => (src1 == src2) as i32,
+        Bne => (src1 != src2) as i32,
+        Blt => (src1 < src2) as i32,
+        Bltu => ((src1 as u32) < (src2 as u32)) as i32,
+        Bge => (src1 >= src2) as i32,
+        Bgeu => ((src1 as u32) >= (src2 as u32)) as i32,
+        Lb | Lbu | Lh | Lhu | Lw | Sb | Sh | Sw => src1 + src2,
+        Mul => (((src1 as i64) * (src1 as i64)) & 0xffffffff) as i32,
+        Mulh => ((((src1 as i64) * (src2 as i64)) as u64) >> 32) as i32,
+        Mulhu | Mulhsu => (((src1 as u64) * (src2 as u64)) >> 32) as i32,
+        Div => src1 / src2,
+        Divu => ((src1 as u32) / (src2 as u32)) as i32,
+        Rem => src1 % src2,
+        Remu => ((src1 as u32) % (src2 as u32)) as i32,
+        _ => 0
     }
 }

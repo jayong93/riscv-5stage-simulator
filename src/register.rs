@@ -18,6 +18,7 @@ impl RegisterFile {
         let mut reg_file = RegisterFile {
             pc: Register::new(pc, true),
             gpr: [Register::new(0, true); 32],
+            fpr: [Register::new(0, true); 32],
         };
         reg_file.gpr[0] = Register::new(0, false); // reinit x0 as read-only
 

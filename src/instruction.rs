@@ -2,8 +2,6 @@
 
 use consts;
 
-pub mod decoder;
-
 /// A single machine instruction.
 #[derive(Clone, Debug)]
 pub struct Instruction {

@@ -3,8 +3,7 @@
 
 use hazards;
 use instruction::Instruction;
-use memory::data::DataMemory;
-use memory::instruction::InstructionMemory;
+use memory::ProcessMemory;
 use pipeline::Pipeline;
 use pipeline::stages::{insn_fetch, insn_decode, execute, access_memory,
                        reg_writeback};
