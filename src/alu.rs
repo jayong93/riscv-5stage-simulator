@@ -7,23 +7,22 @@ pub fn alu(pipeline_reg: &pipeline::IdExRegister) -> i32 {
     use instruction::Function::*;
     let (src1, src2) = (pipeline_reg.rs1, pipeline_reg.rs2);
 
-    match pipeline_reg.insn.function {
+    match &pipeline_reg.inst.function {
         Add | Addi => src1 + src2,
-        Subi => src1 - src2,
         Slt | Slti => {
             if src1 < src2 {
                 1
             } else {
                 0
             }
-        }
+        },
         Sltu | Sltiu => {
             if (src1 as u32) < (src2 as u32) {
                 1
             } else {
                 0
             }
-        }
+        },
         And | Andi => src1 & src2,
         Or | Ori => src1 | src2,
         Xor | Xori => src1 ^ src2,

@@ -90,6 +90,7 @@ impl Fields {
                     | ((inst & 0x100000) >> 9)
                     | ((inst & 0x7fe00000) >> 20))
             }
+            _ => 0,
         };
         let shamt = match opcode {
             Opcode::Lui | Opcode::AuiPc => 0,
@@ -112,7 +113,7 @@ impl Fields {
 }
 
 /// RISC-V 32I opcodes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Opcode {
     Lui,
     AuiPc,
@@ -183,9 +184,9 @@ impl From<Opcode> for Format {
             Opcode::Jal => Format::J,
             Opcode::Jalr => Format::I,
             Opcode::Branch => Format::B,
-            Opcode::Load => Format::I,
-            Opcode::Store => Format::S,
-            Opcode::Op => Format::R,
+            Opcode::Load | Opcode::LoadFp => Format::I,
+            Opcode::Store | Opcode::StoreFp => Format::S,
+            Opcode::Op | Opcode::OpFp => Format::R,
             Opcode::OpImm => Format::I,
             Opcode::MiscMem => Format::I,
             Opcode::System => Format::I,
@@ -370,14 +371,14 @@ impl Function {
                     (Opcode::OpImm, 0b101, 0b01_00000) => Function::Srai,
                     (Opcode::Op, 0b000, 0b0) => Function::Add,
                     (Opcode::Op, 0b000, 0b01_00000) => Function::Sub,
-                    (Opcode::Op, 0b001, _) => Function::Sll,
-                    (Opcode::Op, 0b010, _) => Function::Slt,
-                    (Opcode::Op, 0b011, _) => Function::Sltu,
-                    (Opcode::Op, 0b100, _) => Function::Xor,
+                    (Opcode::Op, 0b001, 0b0) => Function::Sll,
+                    (Opcode::Op, 0b010, 0b0) => Function::Slt,
+                    (Opcode::Op, 0b011, 0b0) => Function::Sltu,
+                    (Opcode::Op, 0b100, 0b0) => Function::Xor,
                     (Opcode::Op, 0b101, 0b0) => Function::Srl,
                     (Opcode::Op, 0b101, 0b01_00000) => Function::Sra,
-                    (Opcode::Op, 0b110, _) => Function::Or,
-                    (Opcode::Op, 0b111, _) => Function::And,
+                    (Opcode::Op, 0b110, 0b0) => Function::Or,
+                    (Opcode::Op, 0b111, 0b0) => Function::And,
                     (Opcode::MiscMem, 0b000, _) => Function::Fence,
                     (Opcode::MiscMem, 0b001, _) => Function::Fencei,
                     (Opcode::System, 0b0, _) if fields.imm == 1 => Function::Ebreak,

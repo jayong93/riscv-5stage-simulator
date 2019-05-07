@@ -1,6 +1,5 @@
 //! 32-bit register and RV32I register file.
 
-
 /// A complete RV32I register file.
 ///
 /// Holds 32 general purpose registers and a program counter register.
@@ -10,7 +9,6 @@ pub struct RegisterFile {
     pub gpr: [Register; 32],
     pub fpr: [Register; 32],
 }
-
 
 impl RegisterFile {
     /// Constructs a new `RegisterFile`.
@@ -26,7 +24,6 @@ impl RegisterFile {
     }
 }
 
-
 /// A write-protectable register.
 #[derive(Clone, Copy, Debug)]
 pub struct Register {
@@ -36,7 +33,6 @@ pub struct Register {
     /// If false, writing to the register has no effect.
     is_writable: bool,
 }
-
 
 impl Register {
     /// Constructs a new `Register`.
@@ -50,9 +46,12 @@ impl Register {
     }
 
     /// Writes `value` to the register if it's writable, otherwise no effect.
-    pub fn write(&mut self, value: u32) {
+    pub fn write<T>(&mut self, value: T) {
+        if std::mem::size_of::<T>() > 4 {
+            panic!("Can't write a value with size bigger than 4 to register")
+        }
         if self.is_writable {
-            self.value = value;
+            self.value = unsafe { *(&value as *const T as *const u32) };
         }
     }
 }

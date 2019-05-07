@@ -4,65 +4,36 @@
 extern crate env_logger;
 extern crate riscv_5stage_simulator;
 
-use riscv_5stage_simulator::ca_simulator;
-use riscv_5stage_simulator::memory::data::DataMemory;
-use riscv_5stage_simulator::memory::instruction::DisassemblyInstructionMemory;
-use riscv_5stage_simulator::register::RegisterFile;
-
 use std::env;
 use std::fs::File;
-
-
-const LOGO: &str = "
-RISC-V 5-Stage Simulator
-
-              vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-                  vvvvvvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrr       vvvvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrrrrr      vvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrrrrrrr    vvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrrrrrrr    vvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrrrrrrr    vvvvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrrrrr      vvvvvvvvvvvvvvvvvvvvvv
-rrrrrrrrrrrrr       vvvvvvvvvvvvvvvvvvvvvv
-rr                vvvvvvvvvvvvvvvvvvvvvv
-rr            vvvvvvvvvvvvvvvvvvvvvvvv      rr
-rrrr      vvvvvvvvvvvvvvvvvvvvvvvvvv      rrrr
-rrrrrr      vvvvvvvvvvvvvvvvvvvvvv      rrrrrr
-rrrrrrrr      vvvvvvvvvvvvvvvvvv      rrrrrrrr
-rrrrrrrrrr      vvvvvvvvvvvvvv      rrrrrrrrrr
-rrrrrrrrrrrr      vvvvvvvvvv      rrrrrrrrrrrr
-rrrrrrrrrrrrrr      vvvvvv      rrrrrrrrrrrrrr
-rrrrrrrrrrrrrrrr      vv      rrrrrrrrrrrrrrrr
-rrrrrrrrrrrrrrrrrr          rrrrrrrrrrrrrrrrrr
-rrrrrrrrrrrrrrrrrrrr      rrrrrrrrrrrrrrrrrrrr
-rrrrrrrrrrrrrrrrrrrrrr  rrrrrrrrrrrrrrrrrrrrrr
-
-";
-
+use std::io::prelude::*;
+use riscv_5stage_simulator::memory::ProcessMemory;
+use riscv_5stage_simulator::pipeline::Pipeline;
 
 fn main() {
     env_logger::init().unwrap();
 
     let args: Vec<String> = env::args().collect();
     let program_name = &args[0];
-
-    let instructions: DisassemblyInstructionMemory;
-    let mut data_memory = DataMemory::new(8192);
-    let mut registers = RegisterFile::new(0x0);
+    let mut f_data = Vec::new();
+    let process_image;
+    let elf;
 
     if let Some(filename) = args.get(1) {
-        let f = File::open(filename).expect("error opening file");
-        instructions = DisassemblyInstructionMemory::new(&f);
+        let mut f = File::open(filename).expect("error opening file");
+        f.read_to_end(&mut f_data).expect("Can't read from a file");
+        elf = goblin::elf::Elf::parse(&f_data).expect("It's not a elf binary file");
+        process_image = ProcessMemory::new(&elf, &f_data);
     } else {
         println!("Usage: {} <filename>", program_name);
         std::process::exit(1);
     }
 
-    println!("{}", LOGO);
+    let mut pipeline = Pipeline::new(elf.entry as u32, process_image);
 
-    let halt_addr =
-        ca_simulator::run(&instructions, &mut data_memory, &mut registers);
-
-    println!("Caught HALT instruction at {:#0x}, exiting...", halt_addr);
+    let mut clock = (1..);
+    loop {
+        let result = pipeline.run_clock();
+        clock.next().unwrap();
+    }
 }

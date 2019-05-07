@@ -11,7 +11,6 @@ pub mod pipeline;
 pub mod register;
 pub mod stages;
 
-#[macro_use]
 extern crate log;
 extern crate goblin;
 extern crate regex;
