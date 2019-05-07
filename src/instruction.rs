@@ -25,7 +25,7 @@ impl Instruction {
     pub fn new(value: u32) -> Instruction {
         let opcode: Opcode = value.into();
         let format = opcode.into();
-        let fields = Fields::default();
+        let fields = Fields::new(value, format, opcode);
         let function = Function::new(value, &fields, opcode);
         Instruction {
             value,
@@ -196,7 +196,7 @@ impl From<Opcode> for Format {
 }
 
 /// RISC-V 32I mnemonics.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Function {
     /// Load upper immediate
     Lui,

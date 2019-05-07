@@ -19,6 +19,7 @@ impl RegisterFile {
             fpr: [Register::new(0, true); 32],
         };
         reg_file.gpr[0] = Register::new(0, false); // reinit x0 as read-only
+        reg_file.gpr[2] = Register::new(u32::max_value(), true);
 
         reg_file
     }

@@ -29,11 +29,15 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut pipeline = Pipeline::new(elf.entry as u32, process_image);
+    let mut pipeline = Pipeline::new(dbg!(elf.entry) as u32, process_image);
 
-    let mut clock = (1..);
+    let mut clock = 1..;
     loop {
+        println!("Clock #{} | pc: {:x} | {:?}",
+                 clock.next().unwrap(),
+                 pipeline.mem_wb.pc,
+                 pipeline.mem_wb.inst);
         let result = pipeline.run_clock();
-        clock.next().unwrap();
+        if result { break }
     }
 }

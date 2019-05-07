@@ -7,12 +7,14 @@ use std::mem::size_of;
 pub struct ProcessMemory {
     v_address_range: (u32, u32),
     read_only_range: (u32, u32),
+    stack_range: (u32, u32),
     data: Vec<u8>,
+    stack: Vec<u8>,
 }
 
 impl ProcessMemory {
     pub fn new(elf_struct: &goblin::elf::Elf, elf_data: &[u8]) -> Self {
-        elf_struct
+        let mut memory = elf_struct
             .program_headers
             .iter()
             .filter(|header| {
@@ -50,11 +52,14 @@ impl ProcessMemory {
                 memory.data[old_size..(old_size + header.p_filesz as usize)]
                     .copy_from_slice(&elf_data[header.file_range()]);
                 memory
-            })
+            });
+        memory.stack.resize(8*1024*1024, 0);
+        memory.stack_range = (u32::max_value()-memory.stack.len() as u32, 0);
+        memory
     }
 
     fn check_address_space(&self, addr: u32) {
-        if addr < self.v_address_range.0 || addr >= self.v_address_range.1 {
+        if addr < self.v_address_range.0 || (addr >= self.v_address_range.1 && addr < self.stack_range.0) {
             panic!("{} is out of address range.", addr);
         }
     }
@@ -77,9 +82,15 @@ impl ProcessMemory {
     pub fn read<T: num_traits::Num + Copy>(&self, addr: u32) -> T {
         self.check_address_space(addr);
 
-        let offset = (addr - self.v_address_range.0) as usize;
         let data_size = size_of::<T>() as usize;
-        let data = &(self.data[offset..offset + data_size]);
+        let data;
+        if addr < self.stack_range.0 {
+            let offset = (addr - self.v_address_range.0) as usize;
+            data = &(self.data[offset..offset + data_size]);
+        } else {
+            let offset = (u32::max_value() - addr) as usize;
+            data = &(self.stack[offset..offset + data_size]);
+        }
         let data_ptr = data.as_ptr() as *const T;
         unsafe { *std::slice::from_raw_parts(data_ptr, 1).get_unchecked(0) }
     }
@@ -88,9 +99,15 @@ impl ProcessMemory {
         self.check_address_space(addr);
         self.check_write_address_space(addr);
 
-        let offset = (addr - self.v_address_range.0) as usize;
         let data_size = size_of::<T>() as usize;
-        let data = &mut (self.data[offset..offset + data_size]);
+        let data;
+        if addr < self.stack_range.0 {
+            let offset = (addr - self.v_address_range.0) as usize;
+            data = &mut (self.data[offset..offset + data_size]);
+        } else {
+            let offset = (u32::max_value() - addr) as usize;
+            data = &mut (self.stack[offset..offset + data_size]);
+        }
         let ptr = &value as *const T as *const u8;
         let byte_slice = unsafe { std::slice::from_raw_parts(ptr, data_size) };
         data.copy_from_slice(byte_slice);

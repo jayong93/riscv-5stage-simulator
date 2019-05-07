@@ -63,21 +63,31 @@ impl Pipeline {
 
         self.id_ex.inst = Instruction::new(self.if_id.raw_inst);
         self.id_ex.pc = self.if_id.pc;
-        self.id_ex.rs1 =
-            self.reg.gpr[self.id_ex.inst.fields.rs1 as usize].read() as i32;
-        self.id_ex.rs2 = match self.id_ex.inst.opcode {
-            OpImm | Lui | AuiPc | Load | LoadFp => {
-                self.id_ex.inst.fields.imm as i32
+        let rs1 = self.id_ex.inst.fields.rs1;
+        if let Some(rs1_val) = self.get_register_with_forwarding(rs1, false) {
+            self.id_ex.rs1 = rs1_val as i32;
+        } else {
+            self.id_ex = Default::default();
+            return;
+        }
+
+        if let OpImm | Lui | AuiPc | Load | LoadFp = self.id_ex.inst.opcode {
+            self.id_ex.rs2 = self.id_ex.inst.fields.imm as i32;
+        }
+        else {
+            let rs2 = self.id_ex.inst.fields.rs2;
+            if let Some(rs2_val) = self.get_register_with_forwarding(rs2, false) {
+                self.id_ex.rs2 = rs2_val as i32
+            } else {
+                self.id_ex = Default::default();
+                return
             }
-            _ => {
-                self.reg.gpr[self.id_ex.inst.fields.rs2 as usize].read() as i32
-            }
-        };
+        }
+
         self.id_ex.target_addr = match self.id_ex.inst.opcode {
             Branch | Jal => self.id_ex.inst.fields.imm + self.id_ex.pc,
             Jalr => {
-                self.id_ex.inst.fields.imm
-                    + self.reg.gpr[self.id_ex.rs1 as usize].read()
+                self.id_ex.inst.fields.imm + self.id_ex.rs1 as u32
             }
             _ => 0,
         };
@@ -90,7 +100,7 @@ impl Pipeline {
         {
 
         } else if Function::Ecall == self.id_ex.inst.function
-            && self.reg.gpr[7].read() == 60
+            && self.reg.gpr[17].read() == 60
         {
             // It's exit system call!
             return true;
@@ -99,18 +109,31 @@ impl Pipeline {
             self.ex_mem.inst = self.id_ex.inst.clone();
             self.ex_mem.alu_result = alu::alu(&self.id_ex);
             self.ex_mem.rs2 = self.id_ex.rs2;
+            self.ex_mem.target_addr = self.id_ex.target_addr;
         }
         return false;
     }
 
     fn memory_access(&mut self) {
         // Atomic 명령어 처리를 이 단계에서 해야함.
+        self.mem_wb.pc = self.ex_mem.pc;
+        self.mem_wb.inst = self.ex_mem.inst.clone();
+
         match self.ex_mem.inst.opcode {
-            Branch | Jal | Jalr => {},
+            Branch if self.ex_mem.alu_result == 1 => {
+                self.reg.pc.write(self.ex_mem.target_addr);
+                self.ex_mem = Default::default();
+                self.id_ex = Default::default();
+                self.if_id = Default::default();
+            },
+            Jal | Jalr => {
+                self.reg.pc.write(self.ex_mem.target_addr);
+                self.ex_mem = Default::default();
+                self.id_ex = Default::default();
+                self.if_id = Default::default();
+            },
             Load => {
                 let addr = self.ex_mem.alu_result as u32;
-                self.mem_wb.pc = self.ex_mem.pc;
-                self.mem_wb.inst = self.ex_mem.inst.clone();
                 self.mem_wb.mem_result = match self.ex_mem.inst.function {
                     Function::Lb => self.memory.read::<i8>(addr) as u32,
                     Function::Lbu => self.memory.read::<u8>(addr) as u32,
@@ -125,8 +148,6 @@ impl Pipeline {
                 self.memory.write(addr, self.ex_mem.rs2 as u32);
             }
             _ => {
-                self.mem_wb.pc = self.ex_mem.pc;
-                self.mem_wb.inst = self.ex_mem.inst.clone();
                 self.mem_wb.alu_result = self.ex_mem.alu_result;
             },
         }
@@ -168,6 +189,31 @@ impl Pipeline {
         if mem_wb.fp_div_inst.value != consts::NOP {
             let rd = mem_wb.fp_div_inst.fields.rd as usize;
             self.reg.fpr[rd].write(mem_wb.fp_div_result);
+        }
+    }
+
+    fn get_register_with_forwarding(&self, reg_num: u8, is_fp_register: bool) -> Option<u32> {
+        if is_fp_register {
+            unimplemented!()
+        } else {
+            let mut ex_val = None;
+            if reg_num == self.ex_mem.inst.fields.rd {
+                if self.ex_mem.inst.opcode == Load {
+                    return None
+                }
+                ex_val = match self.ex_mem.inst.opcode {
+                    Store => None,
+                    _ => Some(self.ex_mem.alu_result as u32)
+                }
+            } 
+
+            ex_val.or_else(|| {
+                if reg_num == self.mem_wb.inst.fields.rd && self.mem_wb.inst.opcode == Load {
+                    Some(self.mem_wb.mem_result)
+                } else {
+                    Some(self.reg.gpr[reg_num as usize].read())
+                }
+            })
         }
     }
 }
@@ -220,6 +266,7 @@ pub struct ExMemRegister {
     pub inst: Instruction,
     pub alu_result: i32,
     pub rs2: i32,
+    pub target_addr: u32,
 }
 
 impl ExMemRegister {
