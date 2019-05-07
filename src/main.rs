@@ -37,7 +37,7 @@ fn main() {
                  clock.next().unwrap(),
                  pipeline.mem_wb.pc,
                  pipeline.mem_wb.inst);
-        let result = pipeline.run_clock();
-        if result { break }
+        pipeline.run_clock();
+        if pipeline.is_finished { break }
     }
 }

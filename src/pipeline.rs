@@ -1,7 +1,7 @@
 //! Pipeline definition.
 
-use instruction::{Instruction, Function};
 use instruction::Opcode::*;
+use instruction::{Function, Instruction};
 use memory;
 use register;
 use std::collections::VecDeque;
@@ -21,6 +21,7 @@ pub struct Pipeline {
     pub fp_mul_mem: FpMemRegister,
     pub fp_div_mem: FpMemRegister,
     pub mem_wb: MemWbRegister,
+    pub is_finished: bool,
 }
 
 impl Pipeline {
@@ -38,6 +39,7 @@ impl Pipeline {
             fp_mul_mem: Default::default(),
             fp_div_mem: Default::default(),
             mem_wb: Default::default(),
+            is_finished: false,
         }
     }
 
@@ -65,32 +67,27 @@ impl Pipeline {
         self.id_ex.pc = self.if_id.pc;
         let rs1 = self.id_ex.inst.fields.rs1;
         if let Some(rs1_val) = self.get_register_with_forwarding(rs1, false) {
-            self.id_ex.rs1 = rs1_val as i32;
+            self.id_ex.A = rs1_val as i32;
         } else {
             self.id_ex = Default::default();
             return;
         }
 
-        if let OpImm | Lui | AuiPc | Load | LoadFp = self.id_ex.inst.opcode {
-            self.id_ex.rs2 = self.id_ex.inst.fields.imm as i32;
-        }
-        else {
-            let rs2 = self.id_ex.inst.fields.rs2;
-            if let Some(rs2_val) = self.get_register_with_forwarding(rs2, false) {
-                self.id_ex.rs2 = rs2_val as i32
-            } else {
-                self.id_ex = Default::default();
-                return
-            }
+        let rs2 = self.id_ex.inst.fields.rs2;
+        if let Some(rs2_val) = self.get_register_with_forwarding(rs2, false) {
+            self.id_ex.B = rs2_val as i32
+        } else {
+            self.id_ex = Default::default();
+            return;
         }
 
+        self.id_ex.imm = self.id_ex.inst.fields.imm as i32;
+
         self.id_ex.target_addr = match self.id_ex.inst.opcode {
-            Branch | Jal => self.id_ex.inst.fields.imm + self.id_ex.pc,
-            Jalr => {
-                self.id_ex.inst.fields.imm + self.id_ex.rs1 as u32
-            }
+            Branch | Jal => self.id_ex.imm + self.id_ex.pc as i32,
+            Jalr => self.id_ex.imm + self.id_ex.A as i32,
             _ => 0,
-        };
+        } as u32;
     }
 
     fn execute(&mut self) -> bool {
@@ -100,18 +97,27 @@ impl Pipeline {
         {
 
         } else if Function::Ecall == self.id_ex.inst.function
-            && self.reg.gpr[17].read() == 60
+            && self.reg.gpr[17].read() == 93
         {
             // It's exit system call!
-            return true;
+            self.is_finished = true;
         } else {
             self.ex_mem.pc = self.id_ex.pc;
             self.ex_mem.inst = self.id_ex.inst.clone();
-            self.ex_mem.alu_result = alu::alu(&self.id_ex);
-            self.ex_mem.rs2 = self.id_ex.rs2;
+            let (input1, input2) = match self.id_ex.inst.opcode {
+                OpImm | Lui | Load | LoadFp | Store | StoreFp => {
+                    (self.id_ex.A, self.id_ex.inst.fields.imm as i32)
+                }
+                AuiPc => (self.id_ex.pc as i32, self.id_ex.imm),
+                Jal | Jalr => (self.id_ex.pc as i32, 4),
+                _ => (self.id_ex.A, self.id_ex.B),
+            };
+            self.ex_mem.alu_result =
+                alu::alu(&self.id_ex.inst.function, input1, input2);
+            self.ex_mem.B = self.id_ex.B;
             self.ex_mem.target_addr = self.id_ex.target_addr;
         }
-        return false;
+        false
     }
 
     fn memory_access(&mut self) {
@@ -122,16 +128,15 @@ impl Pipeline {
         match self.ex_mem.inst.opcode {
             Branch if self.ex_mem.alu_result == 1 => {
                 self.reg.pc.write(self.ex_mem.target_addr);
-                self.ex_mem = Default::default();
                 self.id_ex = Default::default();
                 self.if_id = Default::default();
-            },
+            }
             Jal | Jalr => {
                 self.reg.pc.write(self.ex_mem.target_addr);
-                self.ex_mem = Default::default();
+                self.mem_wb.alu_result = self.ex_mem.alu_result;
                 self.id_ex = Default::default();
                 self.if_id = Default::default();
-            },
+            }
             Load => {
                 let addr = self.ex_mem.alu_result as u32;
                 self.mem_wb.mem_result = match self.ex_mem.inst.function {
@@ -140,16 +145,16 @@ impl Pipeline {
                     Function::Lh => self.memory.read::<i16>(addr) as u32,
                     Function::Lhu => self.memory.read::<u16>(addr) as u32,
                     Function::Lw => self.memory.read::<u32>(addr) as u32,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
             }
             Store => {
                 let addr = self.ex_mem.alu_result as u32;
-                self.memory.write(addr, self.ex_mem.rs2 as u32);
+                self.memory.write(addr, self.ex_mem.B as u32);
             }
             _ => {
                 self.mem_wb.alu_result = self.ex_mem.alu_result;
-            },
+            }
         }
     }
 
@@ -160,18 +165,16 @@ impl Pipeline {
         let mem_wb = &self.mem_wb;
         let inst = &mem_wb.inst;
         let rd = inst.fields.rd as usize;
-        let npc = mem_wb.pc + consts::WORD_SIZE as u32;
         match inst.opcode {
-            LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp => unreachable!(),
+            LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp => {
+                unreachable!()
+            }
             Opcode::Store | Opcode::Branch => {}
             Opcode::Load => {
                 self.reg.gpr[rd].write(self.mem_wb.mem_result);
             }
             Opcode::Lui => {
                 self.reg.gpr[rd].write(inst.fields.imm);
-            }
-            Opcode::Jal | Opcode::Jalr => {
-                self.reg.gpr[rd].write(npc);
             }
             _ => {
                 self.reg.gpr[rd].write(mem_wb.alu_result as u32);
@@ -192,24 +195,32 @@ impl Pipeline {
         }
     }
 
-    fn get_register_with_forwarding(&self, reg_num: u8, is_fp_register: bool) -> Option<u32> {
+    fn get_register_with_forwarding(
+        &self,
+        reg_num: u8,
+        is_fp_register: bool,
+    ) -> Option<u32> {
         if is_fp_register {
             unimplemented!()
         } else {
             let mut ex_val = None;
             if reg_num == self.ex_mem.inst.fields.rd {
                 if self.ex_mem.inst.opcode == Load {
-                    return None
+                    return None;
                 }
                 ex_val = match self.ex_mem.inst.opcode {
                     Store => None,
-                    _ => Some(self.ex_mem.alu_result as u32)
+                    _ => Some(self.ex_mem.alu_result as u32),
                 }
-            } 
+            }
 
             ex_val.or_else(|| {
-                if reg_num == self.mem_wb.inst.fields.rd && self.mem_wb.inst.opcode == Load {
-                    Some(self.mem_wb.mem_result)
+                if reg_num == self.mem_wb.inst.fields.rd {
+                    if self.mem_wb.inst.opcode == Load {
+                        Some(self.mem_wb.mem_result)
+                    } else {
+                        Some(self.mem_wb.alu_result as u32)
+                    }
                 } else {
                     Some(self.reg.gpr[reg_num as usize].read())
                 }
@@ -248,8 +259,9 @@ impl IfIdRegister {
 pub struct IdExRegister {
     pub pc: u32,
     pub inst: Instruction,
-    pub rs1: i32,
-    pub rs2: i32,
+    pub A: i32,
+    pub B: i32,
+    pub imm: i32,
     pub target_addr: u32,
 }
 
@@ -265,7 +277,7 @@ pub struct ExMemRegister {
     pub pc: u32,
     pub inst: Instruction,
     pub alu_result: i32,
-    pub rs2: i32,
+    pub B: i32,
     pub target_addr: u32,
 }
 

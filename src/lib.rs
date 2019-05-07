@@ -11,7 +11,6 @@ pub mod pipeline;
 pub mod register;
 pub mod stages;
 
-extern crate log;
 extern crate goblin;
 extern crate regex;
 extern crate byteorder;

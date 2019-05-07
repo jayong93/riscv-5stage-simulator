@@ -54,19 +54,19 @@ impl ProcessMemory {
                 memory
             });
         memory.stack.resize(8*1024*1024, 0);
-        memory.stack_range = (u32::max_value()-memory.stack.len() as u32, 0);
+        memory.stack_range = dbg!((u32::max_value()-memory.stack.len() as u32, 0));
         memory
     }
 
     fn check_address_space(&self, addr: u32) {
         if addr < self.v_address_range.0 || (addr >= self.v_address_range.1 && addr < self.stack_range.0) {
-            panic!("{} is out of address range.", addr);
+            panic!("{:x} is out of address range.", addr);
         }
     }
 
     fn check_write_address_space(&self, addr: u32) {
         if self.read_only_range.0 <= addr && addr < self.read_only_range.1 {
-            panic!("{} is out of writable address range.", addr);
+            panic!("{:x} is out of writable address range.", addr);
         }
     }
 
