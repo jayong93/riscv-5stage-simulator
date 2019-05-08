@@ -27,7 +27,10 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn new(entry_point: u32, memory: memory::ProcessMemory) -> Pipeline {
         Pipeline {
-            reg: register::RegisterFile::new(entry_point, u32::max_value() - 1024),
+            reg: register::RegisterFile::new(
+                entry_point,
+                0u32.overflowing_sub(24).0,
+            ),
             memory,
             if_id: Default::default(),
             id_ex: Default::default(),
@@ -70,10 +73,12 @@ impl Pipeline {
 
         self.id_ex.inst = Instruction::new(self.if_id.raw_inst);
         self.id_ex.pc = self.if_id.pc;
+
         let rs1 = self.id_ex.inst.fields.rs1;
         if let Some(rs1_val) = self.get_register_with_forwarding(rs1, false) {
             self.id_ex.A = rs1_val as i32;
         } else {
+            self.id_ex = Default::default();
             return true;
         }
 
@@ -81,6 +86,7 @@ impl Pipeline {
         if let Some(rs2_val) = self.get_register_with_forwarding(rs2, false) {
             self.id_ex.B = rs2_val as i32
         } else {
+            self.id_ex = Default::default();
             return true;
         }
 
@@ -154,6 +160,7 @@ impl Pipeline {
             Load => {
                 if self.ex_mem.remaining_clock > 0 {
                     self.ex_mem.remaining_clock -= 1;
+                    self.mem_wb = Default::default();
                     return true;
                 }
                 let addr = self.ex_mem.alu_result as u32;
@@ -170,6 +177,7 @@ impl Pipeline {
             Store => {
                 if self.ex_mem.remaining_clock > 0 {
                     self.ex_mem.remaining_clock -= 1;
+                    self.mem_wb = Default::default();
                     return true;
                 }
                 let addr = self.ex_mem.alu_result as u32;
@@ -193,37 +201,41 @@ impl Pipeline {
         use consts;
         use instruction::Opcode;
 
-        let mem_wb = &self.mem_wb;
-        let inst = &mem_wb.inst;
-        let rd = inst.fields.rd as usize;
-        match inst.opcode {
-            LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp => {
-                unreachable!()
+        {
+            let mem_wb = &self.mem_wb;
+            let inst = &mem_wb.inst;
+            let rd = inst.fields.rd as usize;
+            match inst.opcode {
+                LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp => {
+                    unreachable!()
+                }
+                Opcode::Store | Opcode::Branch => {}
+                Opcode::Load => {
+                    self.reg.gpr[rd].write(self.mem_wb.mem_result);
+                }
+                Opcode::Lui => {
+                    self.reg.gpr[rd].write(inst.fields.imm);
+                }
+                _ => {
+                    self.reg.gpr[rd].write(mem_wb.alu_result as u32);
+                }
             }
-            Opcode::Store | Opcode::Branch => {}
-            Opcode::Load => {
-                self.reg.gpr[rd].write(self.mem_wb.mem_result);
+
+            if mem_wb.fp_add_inst.value != consts::NOP {
+                let rd = mem_wb.fp_add_inst.fields.rd as usize;
+                self.reg.fpr[rd].write(mem_wb.fp_add_result);
             }
-            Opcode::Lui => {
-                self.reg.gpr[rd].write(inst.fields.imm);
+            if mem_wb.fp_mul_inst.value != consts::NOP {
+                let rd = mem_wb.fp_mul_inst.fields.rd as usize;
+                self.reg.fpr[rd].write(mem_wb.fp_mul_result);
             }
-            _ => {
-                self.reg.gpr[rd].write(mem_wb.alu_result as u32);
+            if mem_wb.fp_div_inst.value != consts::NOP {
+                let rd = mem_wb.fp_div_inst.fields.rd as usize;
+                self.reg.fpr[rd].write(mem_wb.fp_div_result);
             }
         }
 
-        if mem_wb.fp_add_inst.value != consts::NOP {
-            let rd = mem_wb.fp_add_inst.fields.rd as usize;
-            self.reg.fpr[rd].write(mem_wb.fp_add_result);
-        }
-        if mem_wb.fp_mul_inst.value != consts::NOP {
-            let rd = mem_wb.fp_mul_inst.fields.rd as usize;
-            self.reg.fpr[rd].write(mem_wb.fp_mul_result);
-        }
-        if mem_wb.fp_div_inst.value != consts::NOP {
-            let rd = mem_wb.fp_div_inst.fields.rd as usize;
-            self.reg.fpr[rd].write(mem_wb.fp_div_result);
-        }
+        self.mem_wb = Default::default();
     }
 
     fn get_register_with_forwarding(

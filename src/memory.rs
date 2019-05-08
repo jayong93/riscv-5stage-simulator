@@ -54,7 +54,7 @@ impl ProcessMemory {
                 memory
             });
         memory.stack.resize(8*1024*1024, 0);
-        memory.stack_range = dbg!((u32::max_value()-memory.stack.len() as u32, 0));
+        memory.stack_range = (0u32.overflowing_sub(memory.stack.len() as u32).0, 0);
         memory
     }
 
@@ -88,7 +88,7 @@ impl ProcessMemory {
             let offset = (addr - self.v_address_range.0) as usize;
             data = &(self.data[offset..offset + data_size]);
         } else {
-            let offset = (u32::max_value() - addr) as usize;
+            let offset = (addr-self.stack_range.0) as usize;
             data = &(self.stack[offset..offset + data_size]);
         }
         let data_ptr = data.as_ptr() as *const T;
@@ -105,7 +105,7 @@ impl ProcessMemory {
             let offset = (addr - self.v_address_range.0) as usize;
             data = &mut (self.data[offset..offset + data_size]);
         } else {
-            let offset = (u32::max_value() - addr) as usize;
+            let offset = (addr - self.stack_range.0) as usize;
             data = &mut (self.stack[offset..offset + data_size]);
         }
         let ptr = &value as *const T as *const u8;
@@ -188,5 +188,19 @@ mod tests {
         let mut image = ProcessMemory::new(&elf, &elf_data);
 
         image.write(0x20000, 100);
+    }
+
+    #[test]
+    fn test_rw_stack() {
+        let mut elf_data = Vec::new();
+        let _ = std::fs::File::open("tests/hello")
+            .unwrap()
+            .read_to_end(&mut elf_data)
+            .unwrap();
+        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
+        let mut image = ProcessMemory::new(&elf, &elf_data);
+
+        image.write(0u32.overflowing_sub(10).0, 911u32);
+        assert_eq!(image.read::<u32>(0u32.overflowing_sub(10).0), 911u32);
     }
 }

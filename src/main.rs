@@ -30,7 +30,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut pipeline = Pipeline::new(dbg!(elf.entry) as u32, process_image);
+    let mut pipeline = Pipeline::new(elf.entry as u32, process_image);
 
     let mut clock_it = 1..;
     loop {
