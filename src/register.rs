@@ -12,14 +12,14 @@ pub struct RegisterFile {
 
 impl RegisterFile {
     /// Constructs a new `RegisterFile`.
-    pub fn new(pc: u32) -> RegisterFile {
+    pub fn new(pc: u32, stack_pointer: u32) -> RegisterFile {
         let mut reg_file = RegisterFile {
             pc: Register::new(pc, true),
             gpr: [Register::new(0, true); 32],
             fpr: [Register::new(0, true); 32],
         };
         reg_file.gpr[0] = Register::new(0, false); // reinit x0 as read-only
-        reg_file.gpr[2] = Register::new(u32::max_value(), true);
+        reg_file.gpr[2] = Register::new(stack_pointer, true);
 
         reg_file
     }

@@ -27,7 +27,7 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn new(entry_point: u32, memory: memory::ProcessMemory) -> Pipeline {
         Pipeline {
-            reg: register::RegisterFile::new(entry_point),
+            reg: register::RegisterFile::new(entry_point, u32::max_value() - 1024),
             memory,
             if_id: Default::default(),
             id_ex: Default::default(),
@@ -44,13 +44,18 @@ impl Pipeline {
     }
 
     // return true when process ends.
-    pub fn run_clock(&mut self) -> bool {
+    pub fn run_clock(&mut self) {
         self.write_back();
-        self.memory_access();
-        let result = self.execute();
-        self.decode();
+        if self.memory_access() {
+            return;
+        }
+        if self.execute() {
+            return;
+        }
+        if self.decode() {
+            return;
+        }
         self.fetch();
-        result
     }
 
     fn fetch(&mut self) {
@@ -60,7 +65,7 @@ impl Pipeline {
         self.if_id.raw_inst = self.memory.read_inst(self.if_id.pc);
     }
 
-    fn decode(&mut self) {
+    fn decode(&mut self) -> bool {
         use instruction::Opcode::*;
 
         self.id_ex.inst = Instruction::new(self.if_id.raw_inst);
@@ -69,16 +74,14 @@ impl Pipeline {
         if let Some(rs1_val) = self.get_register_with_forwarding(rs1, false) {
             self.id_ex.A = rs1_val as i32;
         } else {
-            self.id_ex = Default::default();
-            return;
+            return true;
         }
 
         let rs2 = self.id_ex.inst.fields.rs2;
         if let Some(rs2_val) = self.get_register_with_forwarding(rs2, false) {
             self.id_ex.B = rs2_val as i32
         } else {
-            self.id_ex = Default::default();
-            return;
+            return true;
         }
 
         self.id_ex.imm = self.id_ex.inst.fields.imm as i32;
@@ -88,6 +91,9 @@ impl Pipeline {
             Jalr => self.id_ex.imm + self.id_ex.A as i32,
             _ => 0,
         } as u32;
+
+        self.if_id = Default::default();
+        false
     }
 
     fn execute(&mut self) -> bool {
@@ -116,28 +122,40 @@ impl Pipeline {
                 alu::alu(&self.id_ex.inst.function, input1, input2);
             self.ex_mem.B = self.id_ex.B;
             self.ex_mem.target_addr = self.id_ex.target_addr;
+
+            if let Load | Store = self.ex_mem.inst.opcode {
+                self.ex_mem.remaining_clock = 10;
+            }
         }
+
+        self.id_ex = Default::default();
         false
     }
 
-    fn memory_access(&mut self) {
+    fn memory_access(&mut self) -> bool {
         // Atomic 명령어 처리를 이 단계에서 해야함.
         self.mem_wb.pc = self.ex_mem.pc;
         self.mem_wb.inst = self.ex_mem.inst.clone();
 
-        match self.ex_mem.inst.opcode {
+        let is_stall = match self.ex_mem.inst.opcode {
             Branch if self.ex_mem.alu_result == 1 => {
                 self.reg.pc.write(self.ex_mem.target_addr);
                 self.id_ex = Default::default();
                 self.if_id = Default::default();
+                false
             }
             Jal | Jalr => {
                 self.reg.pc.write(self.ex_mem.target_addr);
                 self.mem_wb.alu_result = self.ex_mem.alu_result;
                 self.id_ex = Default::default();
                 self.if_id = Default::default();
+                false
             }
             Load => {
+                if self.ex_mem.remaining_clock > 0 {
+                    self.ex_mem.remaining_clock -= 1;
+                    return true;
+                }
                 let addr = self.ex_mem.alu_result as u32;
                 self.mem_wb.mem_result = match self.ex_mem.inst.function {
                     Function::Lb => self.memory.read::<i8>(addr) as u32,
@@ -146,16 +164,29 @@ impl Pipeline {
                     Function::Lhu => self.memory.read::<u16>(addr) as u32,
                     Function::Lw => self.memory.read::<u32>(addr) as u32,
                     _ => unreachable!(),
-                }
+                };
+                false
             }
             Store => {
+                if self.ex_mem.remaining_clock > 0 {
+                    self.ex_mem.remaining_clock -= 1;
+                    return true;
+                }
                 let addr = self.ex_mem.alu_result as u32;
                 self.memory.write(addr, self.ex_mem.B as u32);
+                false
             }
             _ => {
                 self.mem_wb.alu_result = self.ex_mem.alu_result;
+                false
             }
+        };
+
+        if !is_stall {
+            self.ex_mem = Default::default();
         }
+
+        is_stall
     }
 
     fn write_back(&mut self) {
@@ -279,6 +310,7 @@ pub struct ExMemRegister {
     pub alu_result: i32,
     pub B: i32,
     pub target_addr: u32,
+    pub remaining_clock: u32,
 }
 
 impl ExMemRegister {

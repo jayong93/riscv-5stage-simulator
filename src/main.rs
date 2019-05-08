@@ -1,14 +1,14 @@
 //! A 5-stage pipelining RISC-V 32I simulator.
 
-
 extern crate env_logger;
 extern crate riscv_5stage_simulator;
 
+use riscv_5stage_simulator::memory::ProcessMemory;
+use riscv_5stage_simulator::pipeline::Pipeline;
+use riscv_5stage_simulator::consts;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
-use riscv_5stage_simulator::memory::ProcessMemory;
-use riscv_5stage_simulator::pipeline::Pipeline;
 
 fn main() {
     env_logger::init().unwrap();
@@ -22,7 +22,8 @@ fn main() {
     if let Some(filename) = args.get(1) {
         let mut f = File::open(filename).expect("error opening file");
         f.read_to_end(&mut f_data).expect("Can't read from a file");
-        elf = goblin::elf::Elf::parse(&f_data).expect("It's not a elf binary file");
+        elf = goblin::elf::Elf::parse(&f_data)
+            .expect("It's not a elf binary file");
         process_image = ProcessMemory::new(&elf, &f_data);
     } else {
         println!("Usage: {} <filename>", program_name);
@@ -31,13 +32,20 @@ fn main() {
 
     let mut pipeline = Pipeline::new(dbg!(elf.entry) as u32, process_image);
 
-    let mut clock = 1..;
+    let mut clock_it = 1..;
     loop {
-        println!("Clock #{} | pc: {:x} | {:?}",
-                 clock.next().unwrap(),
-                 pipeline.mem_wb.pc,
-                 pipeline.mem_wb.inst);
+        let clock = clock_it.next().unwrap();
+        if pipeline.mem_wb.inst.value != consts::NOP {
+            println!(
+                "Clock #{} | pc: {:x} | {:?}",
+                clock,
+                pipeline.mem_wb.pc,
+                pipeline.mem_wb.inst
+            );
+        }
         pipeline.run_clock();
-        if pipeline.is_finished { break }
+        if pipeline.is_finished {
+            break;
+        }
     }
 }
