@@ -252,17 +252,17 @@ impl Pipeline {
                     return None;
                 }
                 ex_val = match self.ex_mem.inst.opcode {
-                    Store => None,
+                    Store | Branch => None,
                     _ => Some(self.ex_mem.alu_result as u32),
                 }
             }
 
             ex_val.or_else(|| {
                 if reg_num == self.mem_wb.inst.fields.rd {
-                    if self.mem_wb.inst.opcode == Load {
-                        Some(self.mem_wb.mem_result)
-                    } else {
-                        Some(self.mem_wb.alu_result as u32)
+                    match self.mem_wb.inst.opcode {
+                        Load => Some(self.mem_wb.mem_result),
+                        Store | Branch => None,
+                        _ => Some(self.mem_wb.alu_result as u32),
                     }
                 } else {
                     Some(self.reg.gpr[reg_num as usize].read())
