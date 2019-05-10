@@ -214,10 +214,9 @@ impl Pipeline {
                     _ => {
                         self.mem_wb.mem_result =
                             self.memory.read::<u32>(self.ex_mem.A as u32);
-                        // Amo 명령어 계산 결과 rs1에 쓰기 위해 전달.
                         let (a_val, b_val) =
                             (self.mem_wb.mem_result, self.ex_mem.B as u32);
-                        self.mem_wb.alu_result = match self
+                        let new_val = match self
                             .ex_mem
                             .inst
                             .function
@@ -238,8 +237,8 @@ impl Pipeline {
                             }
                             Function::Amominuw => std::cmp::min(a_val, b_val),
                             _ => unreachable!(),
-                        }
-                            as i32;
+                        };
+                        self.memory.write(self.ex_mem.A as u32, new_val);
                     }
                 }
                 false
@@ -270,17 +269,8 @@ impl Pipeline {
                     unreachable!()
                 }
                 Opcode::Store | Opcode::Branch => {}
-                Opcode::Load => self.reg.gpr[rd].write(self.mem_wb.mem_result),
+                Opcode::Load | Amo => self.reg.gpr[rd].write(self.mem_wb.mem_result),
                 Opcode::Lui => self.reg.gpr[rd].write(inst.fields.imm),
-                Amo => {
-                    self.reg.gpr[rd].write(mem_wb.mem_result);
-                    if inst.function != Function::Lrw
-                        && inst.function != Function::Scw
-                    {
-                        self.reg.gpr[inst.fields.rs1 as usize]
-                            .write(mem_wb.alu_result);
-                    }
-                }
                 _ => {
                     self.reg.gpr[rd].write(mem_wb.alu_result as u32);
                 }
@@ -329,16 +319,10 @@ impl Pipeline {
                     && mem_opcode != Branch
                     && reg_num == inst.fields.rd
                 {
-                    match self.mem_wb.inst.opcode {
+                    match mem_opcode {
                         Load | Amo => Some(self.mem_wb.mem_result),
                         _ => Some(self.mem_wb.alu_result as u32),
                     }
-                } else if Amo == mem_opcode
-                    && Function::Lrw != inst.function
-                    && Function::Scw != inst.function
-                    && inst.fields.rs1 == reg_num
-                {
-                    Some(self.mem_wb.alu_result as u32)
                 } else {
                     Some(self.reg.gpr[reg_num as usize].read())
                 }
