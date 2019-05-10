@@ -127,10 +127,17 @@ impl Pipeline {
             self.ex_mem.alu_result =
                 alu::alu(&self.id_ex.inst.function, input1, input2);
             self.ex_mem.B = self.id_ex.B;
+            self.ex_mem.A = self.id_ex.A;
             self.ex_mem.target_addr = self.id_ex.target_addr;
 
-            if let Load | Store = self.ex_mem.inst.opcode {
+            if let Load | Store | Amo = self.ex_mem.inst.opcode {
                 self.ex_mem.remaining_clock = 10;
+                if self.ex_mem.inst.opcode == Amo
+                    && self.ex_mem.inst.function != Function::Lrw
+                    && self.ex_mem.inst.function != Function::Scw
+                {
+                    self.ex_mem.remaining_clock += 10;
+                }
             }
         }
 
@@ -184,6 +191,59 @@ impl Pipeline {
                 self.memory.write(addr, self.ex_mem.B as u32);
                 false
             }
+            Amo => {
+                if (self.ex_mem.A & 0b11, self.ex_mem.B & 0b11) != (0, 0) {
+                    panic!(
+                        "Memory misaligned exception on pc:{}, inst: {:?}",
+                        self.ex_mem.pc, self.ex_mem.inst
+                    );
+                }
+                if self.ex_mem.remaining_clock > 0 {
+                    self.ex_mem.remaining_clock -= 1;
+                    self.mem_wb = Default::default();
+                    return true;
+                }
+                match self.ex_mem.inst.function {
+                    Function::Lrw => {
+                        self.mem_wb.mem_result =
+                            self.memory.read::<u32>(self.ex_mem.A as u32);
+                    }
+                    Function::Scw => {
+                        self.memory.write(self.ex_mem.A as u32, self.ex_mem.B);
+                    }
+                    _ => {
+                        self.mem_wb.mem_result =
+                            self.memory.read::<u32>(self.ex_mem.A as u32);
+                        // Amo 명령어 계산 결과 rs1에 쓰기 위해 전달.
+                        let (a_val, b_val) =
+                            (self.mem_wb.mem_result, self.ex_mem.B as u32);
+                        self.mem_wb.alu_result = match self
+                            .ex_mem
+                            .inst
+                            .function
+                        {
+                            Function::Amoswapw => b_val,
+                            Function::Amoaddw => a_val + b_val,
+                            Function::Amoandw => a_val & b_val,
+                            Function::Amoorw => a_val | b_val,
+                            Function::Amoxorw => a_val ^ b_val,
+                            Function::Amomaxw => {
+                                std::cmp::max(a_val as i32, b_val as i32)
+                                    as u32
+                            }
+                            Function::Amomaxuw => std::cmp::max(a_val, b_val),
+                            Function::Amominw => {
+                                std::cmp::min(a_val as i32, b_val as i32)
+                                    as u32
+                            }
+                            Function::Amominuw => std::cmp::min(a_val, b_val),
+                            _ => unreachable!(),
+                        }
+                            as i32;
+                    }
+                }
+                false
+            }
             _ => {
                 self.mem_wb.alu_result = self.ex_mem.alu_result;
                 false
@@ -210,11 +270,16 @@ impl Pipeline {
                     unreachable!()
                 }
                 Opcode::Store | Opcode::Branch => {}
-                Opcode::Load => {
-                    self.reg.gpr[rd].write(self.mem_wb.mem_result);
-                }
-                Opcode::Lui => {
-                    self.reg.gpr[rd].write(inst.fields.imm);
+                Opcode::Load => self.reg.gpr[rd].write(self.mem_wb.mem_result),
+                Opcode::Lui => self.reg.gpr[rd].write(inst.fields.imm),
+                Amo => {
+                    self.reg.gpr[rd].write(mem_wb.mem_result);
+                    if inst.function != Function::Lrw
+                        && inst.function != Function::Scw
+                    {
+                        self.reg.gpr[inst.fields.rs1 as usize]
+                            .write(mem_wb.alu_result);
+                    }
                 }
                 _ => {
                     self.reg.gpr[rd].write(mem_wb.alu_result as u32);
@@ -248,7 +313,7 @@ impl Pipeline {
         } else {
             let mut ex_val = None;
             if reg_num == self.ex_mem.inst.fields.rd {
-                if self.ex_mem.inst.opcode == Load {
+                if let Load | Amo = self.ex_mem.inst.opcode {
                     return None;
                 }
                 ex_val = match self.ex_mem.inst.opcode {
@@ -257,13 +322,23 @@ impl Pipeline {
                 }
             }
 
+            let inst = &self.mem_wb.inst;
+            let mem_opcode = inst.opcode;
             ex_val.or_else(|| {
-                if reg_num == self.mem_wb.inst.fields.rd {
+                if mem_opcode != Store
+                    && mem_opcode != Branch
+                    && reg_num == inst.fields.rd
+                {
                     match self.mem_wb.inst.opcode {
-                        Load => Some(self.mem_wb.mem_result),
-                        Store | Branch => None,
+                        Load | Amo => Some(self.mem_wb.mem_result),
                         _ => Some(self.mem_wb.alu_result as u32),
                     }
+                } else if Amo == mem_opcode
+                    && Function::Lrw != inst.function
+                    && Function::Scw != inst.function
+                    && inst.fields.rs1 == reg_num
+                {
+                    Some(self.mem_wb.alu_result as u32)
                 } else {
                     Some(self.reg.gpr[reg_num as usize].read())
                 }
@@ -320,6 +395,7 @@ pub struct ExMemRegister {
     pub pc: u32,
     pub inst: Instruction,
     pub alu_result: i32,
+    pub A: i32,
     pub B: i32,
     pub target_addr: u32,
     pub remaining_clock: u32,
