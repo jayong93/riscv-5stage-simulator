@@ -1,5 +1,6 @@
 //! Pipeline definition.
 
+use consts;
 use instruction::Opcode::*;
 use instruction::{Function, Instruction};
 use memory;
@@ -71,6 +72,10 @@ impl Pipeline {
     fn decode(&mut self) -> bool {
         use instruction::Opcode::*;
 
+        if self.is_syscall_after_decode() {
+            return true;
+        }
+
         self.id_ex.inst = Instruction::new(self.if_id.raw_inst);
         self.id_ex.pc = self.if_id.pc;
 
@@ -105,21 +110,70 @@ impl Pipeline {
     fn execute(&mut self) -> bool {
         use alu;
 
-        if self.id_ex.inst.function == Function::Ecall
-            && !self.empty_after_execute()
-        {
-            return true;
-        }
-
         if let LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp =
             self.id_ex.inst.opcode
         {
 
-        } else if Function::Ecall == self.id_ex.inst.function
-            && self.reg.gpr[17].read() == 93
-        {
-            // It's exit system call!
-            self.is_finished = true;
+        } else if Function::Ecall == self.id_ex.inst.function {
+            if !self.empty_after_execute() {
+                return true;
+            }
+            self.ex_mem.pc = self.id_ex.pc;
+            self.ex_mem.inst = self.id_ex.inst.clone();
+            if self.reg.gpr[consts::SYSCALL_NUM_REG].read() == 93 {
+                // It's exit system call!
+                self.is_finished = true;
+            } else {
+                // do syscall
+                let ret_val: u32 = match self.reg.gpr[consts::SYSCALL_NUM_REG]
+                    .read()
+                {
+                    78 => {
+                        let buf_addr = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
+                        let buf_size = self.reg.gpr[consts::SYSCALL_ARG4_REG].read();
+                        let path_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                        let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
+
+                        let path_addr = self.memory.read_bytes_mut(path_addr, 1).as_mut_ptr() as *mut i8;
+                        let path_str = unsafe{std::ffi::CString::from_raw(path_addr)}.into_string().expect("Can't convert bytes to Cstring");
+                        dbg!(&path_str);
+                        dbg!(fd as i32);
+                        dbg!(buf_size);
+                        eprintln!("buf_addr: {:x}", buf_addr);
+                        eprintln!("stack_range: {:x}..{:x}", self.memory.stack_range.0, self.memory.stack_range.1);
+                        // TODO: munmap_chunk 에러 해결
+
+                        let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
+                        let contents = nix::fcntl::readlinkat(fd as i32, path_str.as_str(), buf).expect("Can't call readlinkat system call");
+                        contents.len() as u32
+                    }
+                    160 => {
+                        let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                        self.memory.write(addr, nix::sys::utsname::uname());
+                        0
+                    }
+                    174 => nix::unistd::getuid().as_raw(),
+                    175 => nix::unistd::geteuid().as_raw(),
+                    176 => nix::unistd::getgid().as_raw(),
+                    177 => nix::unistd::getegid().as_raw(),
+                    214 => {
+                        let addr =
+                            self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                        let max_mem_addr = self.memory.v_address_range.1;
+                        if max_mem_addr <= addr {
+                            self.memory.data.resize(
+                                (addr - max_mem_addr + 1)
+                                    as usize,
+                                0,
+                            );
+                            self.memory.v_address_range.1 = addr + 1;
+                        }
+                        addr
+                    }
+                    a => panic!("(in {:x})system call #{} is not implemented yet", self.id_ex.pc, a),
+                };
+                self.reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
+            }
         } else {
             self.ex_mem.pc = self.id_ex.pc;
             self.ex_mem.inst = self.id_ex.inst.clone();
@@ -337,6 +391,15 @@ impl Pipeline {
 
     fn empty_after_execute(&self) -> bool {
         self.ex_mem.inst.is_nop() && self.mem_wb.inst.is_nop()
+    }
+    fn is_syscall_after_decode(&self) -> bool {
+        [
+            self.id_ex.inst.function,
+            self.ex_mem.inst.function,
+            self.mem_wb.inst.function,
+        ]
+        .iter()
+        .any(|f| *f == Function::Ecall)
     }
 }
 

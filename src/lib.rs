@@ -15,3 +15,4 @@ extern crate goblin;
 extern crate regex;
 extern crate byteorder;
 extern crate num_traits;
+extern crate nix;

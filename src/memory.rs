@@ -5,11 +5,11 @@ use std::mem::size_of;
 
 #[derive(Debug, Default)]
 pub struct ProcessMemory {
-    v_address_range: (u32, u32),
-    read_only_range: (u32, u32),
-    stack_range: (u32, u32),
-    data: Vec<u8>,
-    stack: Vec<u8>,
+    pub v_address_range: (u32, u32),
+    pub read_only_range: (u32, u32),
+    pub stack_range: (u32, u32),
+    pub data: Vec<u8>,
+    pub stack: Vec<u8>,
 }
 
 impl ProcessMemory {
@@ -32,7 +32,7 @@ impl ProcessMemory {
                 }
 
                 if memory.v_address_range.0 == memory.v_address_range.1 {
-                    memory.v_address_range.0 = vm_range.start as u32;
+                    memory.data.resize(vm_range.start, 0);
                     memory.v_address_range.1 = vm_range.end as u32;
                 } else {
                     let old_size = memory.data.len();
@@ -79,23 +79,41 @@ impl ProcessMemory {
             .expect("Can't read memory as u32 instruction")
     }
 
-    pub fn read<T: num_traits::Num + Copy>(&self, addr: u32) -> T {
-        self.check_address_space(addr);
-
+    pub fn read<T: Copy>(&self, addr: u32) -> T {
         let data_size = size_of::<T>() as usize;
-        let data;
-        if addr < self.stack_range.0 {
-            let offset = (addr - self.v_address_range.0) as usize;
-            data = &(self.data[offset..offset + data_size]);
-        } else {
-            let offset = (addr-self.stack_range.0) as usize;
-            data = &(self.stack[offset..offset + data_size]);
-        }
-        let data_ptr = data.as_ptr() as *const T;
-        unsafe { *std::slice::from_raw_parts(data_ptr, 1).get_unchecked(0) }
+        let data_ptr = self.read_bytes(addr, data_size).as_ptr() as *const T;
+        unsafe { *data_ptr }
     }
 
-    pub fn write<T: num_traits::Num>(&mut self, addr: u32, value: T) {
+    pub fn read_bytes(&self, addr: u32, size: usize) -> &[u8] {
+        self.check_address_space(addr);
+        
+        let buf;
+        let offset = if addr < self.stack_range.0 {
+            buf = &self.data;
+            (addr - self.v_address_range.0) as usize
+        } else {
+            buf = &self.stack;
+            (addr-self.stack_range.0) as usize
+        };
+        &buf[offset..offset+size]
+    }
+
+    pub fn read_bytes_mut(&mut self, addr: u32, size: usize) -> &mut [u8] {
+        self.check_address_space(addr);
+        
+        let buf;
+        let offset = if addr < self.stack_range.0 {
+            buf = &mut self.data;
+            (addr - self.v_address_range.0) as usize
+        } else {
+            buf = &mut self.stack;
+            (addr-self.stack_range.0) as usize
+        };
+        &mut buf[offset..offset+size]
+    }
+
+    pub fn write<T>(&mut self, addr: u32, value: T) {
         self.check_address_space(addr);
         self.check_write_address_space(addr);
 

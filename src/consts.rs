@@ -32,3 +32,12 @@ pub const RS2_SHIFT: u8 = 20;
 pub const RS3_SHIFT: u8 = 27;
 pub const RD_SHIFT: u8 = 7;
 pub const BIT30_SHIFT: u8 = 30;
+
+pub const SYSCALL_NUM_REG: usize = 17;
+pub const SYSCALL_RET_REG: usize = 10;
+pub const SYSCALL_ARG1_REG: usize = 10;
+pub const SYSCALL_ARG2_REG: usize = 11;
+pub const SYSCALL_ARG3_REG: usize = 12;
+pub const SYSCALL_ARG4_REG: usize = 13;
+pub const SYSCALL_ARG5_REG: usize = 14;
+pub const SYSCALL_ARG6_REG: usize = 15;

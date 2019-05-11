@@ -7,7 +7,7 @@ pub fn alu(func: &Function, input1: i32, input2: i32) -> i32 {
     use instruction::Function::*;
 
     match &func {
-        Add | Addi | AuiPc | Jal | Jalr => input1 + input2,
+        Add | Addi | AuiPc | Jal | Jalr => input1.overflowing_add(input2).0,
         Slt | Slti => {
             if input1 < input2 {
                 1
