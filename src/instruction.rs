@@ -35,6 +35,10 @@ impl Instruction {
             function,
         }
     }
+
+    pub fn is_nop(&self) -> bool {
+        self.value == consts::NOP
+    }
 }
 
 impl Default for Instruction {

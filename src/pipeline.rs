@@ -104,6 +104,13 @@ impl Pipeline {
 
     fn execute(&mut self) -> bool {
         use alu;
+
+        if self.id_ex.inst.function == Function::Ecall
+            && !self.empty_after_execute()
+        {
+            return true;
+        }
+
         if let LoadFp | StoreFp | Fmadd | Fmsub | Fnmadd | Fnmsub | OpFp =
             self.id_ex.inst.opcode
         {
@@ -216,11 +223,7 @@ impl Pipeline {
                             self.memory.read::<u32>(self.ex_mem.A as u32);
                         let (a_val, b_val) =
                             (self.mem_wb.mem_result, self.ex_mem.B as u32);
-                        let new_val = match self
-                            .ex_mem
-                            .inst
-                            .function
-                        {
+                        let new_val = match self.ex_mem.inst.function {
                             Function::Amoswapw => b_val,
                             Function::Amoaddw => a_val + b_val,
                             Function::Amoandw => a_val & b_val,
@@ -269,7 +272,9 @@ impl Pipeline {
                     unreachable!()
                 }
                 Opcode::Store | Opcode::Branch => {}
-                Opcode::Load | Amo => self.reg.gpr[rd].write(self.mem_wb.mem_result),
+                Opcode::Load | Amo => {
+                    self.reg.gpr[rd].write(self.mem_wb.mem_result)
+                }
                 Opcode::Lui => self.reg.gpr[rd].write(inst.fields.imm),
                 _ => {
                     self.reg.gpr[rd].write(mem_wb.alu_result as u32);
@@ -328,6 +333,10 @@ impl Pipeline {
                 }
             })
         }
+    }
+
+    fn empty_after_execute(&self) -> bool {
+        self.ex_mem.inst.is_nop() && self.mem_wb.inst.is_nop()
     }
 }
 
