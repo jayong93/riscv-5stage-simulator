@@ -134,17 +134,10 @@ impl Pipeline {
                         let path_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
                         let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
 
-                        let path_addr = self.memory.read_bytes_mut(path_addr, 1).as_mut_ptr() as *mut i8;
-                        let path_str = unsafe{std::ffi::CString::from_raw(path_addr)}.into_string().expect("Can't convert bytes to Cstring");
-                        dbg!(&path_str);
-                        dbg!(fd as i32);
-                        dbg!(buf_size);
-                        eprintln!("buf_addr: {:x}", buf_addr);
-                        eprintln!("stack_range: {:x}..{:x}", self.memory.stack_range.0, self.memory.stack_range.1);
-                        // TODO: munmap_chunk 에러 해결
-
+                        let path_addr = self.memory.read_bytes(path_addr, 1).as_ptr() as *const i8;
+                        let path_str = unsafe{std::ffi::CStr::from_ptr(path_addr)}.to_str().expect("Can't convert bytes to str");
                         let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
-                        let contents = nix::fcntl::readlinkat(fd as i32, path_str.as_str(), buf).expect("Can't call readlinkat system call");
+                        let contents = nix::fcntl::readlinkat(fd as i32, path_str, buf).expect("Can't call readlinkat system call");
                         contents.len() as u32
                     }
                     160 => {
@@ -169,6 +162,9 @@ impl Pipeline {
                             self.memory.v_address_range.1 = addr + 1;
                         }
                         addr
+                    }
+                    222 => {
+                        unimplemented!()
                     }
                     a => panic!("(in {:x})system call #{} is not implemented yet", self.id_ex.pc, a),
                 };
@@ -253,9 +249,9 @@ impl Pipeline {
                 false
             }
             Amo => {
-                if (self.ex_mem.A & 0b11, self.ex_mem.B & 0b11) != (0, 0) {
+                if self.ex_mem.A & 0b11 != 0 {
                     panic!(
-                        "Memory misaligned exception on pc:{}, inst: {:?}",
+                        "Memory misaligned exception on pc:{:x}, inst: {:?}",
                         self.ex_mem.pc, self.ex_mem.inst
                     );
                 }
