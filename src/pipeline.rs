@@ -30,7 +30,7 @@ impl Pipeline {
         Pipeline {
             reg: register::RegisterFile::new(
                 entry_point,
-                0u32.overflowing_sub(24).0,
+                memory.stack_pointer_init,
             ),
             memory,
             if_id: Default::default(),

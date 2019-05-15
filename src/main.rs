@@ -24,7 +24,7 @@ fn main() {
         f.read_to_end(&mut f_data).expect("Can't read from a file");
         elf = goblin::elf::Elf::parse(&f_data)
             .expect("It's not a elf binary file");
-        process_image = ProcessMemory::new(&elf, &f_data);
+        process_image = ProcessMemory::new(&elf, &f_data, filename);
     } else {
         println!("Usage: {} <filename>", program_name);
         std::process::exit(1);

@@ -1,0 +1,17 @@
+pub const AT_NULL: u32 = 0;
+pub const AT_IGNORE: u32 = 1;
+pub const AT_EXECFD: u32 = 2;
+pub const AT_PHDR: u32 = 3;
+pub const AT_PHENT: u32 = 4;
+pub const AT_PHNUM: u32 = 5;
+pub const AT_PAGESZ: u32 = 6;
+pub const AT_BASE: u32 = 7;
+pub const AT_FLAGS: u32 = 8;
+pub const AT_ENTRY: u32 = 9;
+pub const AT_NOTELF: u32 = 10;
+pub const AT_UID: u32 = 11;
+pub const AT_EUID: u32 = 12;
+pub const AT_GID: u32 = 13;
+pub const AT_EGID: u32 = 14;
+pub const AT_SECURE: u32 = 23;
+pub const AT_RANDOM: u32 = 25;
