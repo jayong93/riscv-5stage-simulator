@@ -105,12 +105,6 @@ impl ProcessMemory {
         let header_addr = sp;
         let sp = self.push_program_name(program_name, sp);
         let program_name_addr = sp;
-        // push AUX_NULL Aux vec
-        let sp = {
-            let sp = sp.wrapping_sub(size_of::<AuxVec>() as u32);
-            self.write(sp, AuxVec::new(0, 0));
-            sp
-        };
         // push Aux vecs
         let sp = self.push_aux_vecs(header_addr, header_num, program_name_addr, entry_point, sp);
         let sp = [0u32, 0u32, program_name_addr, 1u32].iter().fold(
