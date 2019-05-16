@@ -427,8 +427,9 @@ impl Function {
                     (Opcode::OpFp, _, 0b110_1000) => Function::Fcvtsw,
                     (Opcode::OpFp, 0b000, 0b111_1000) if fields.rs2 == 0b0 => Function::Fmvwx,
                     _ => panic!(
-                        "Failed to decode instruction {:#0x}",
-                        inst
+                        "Failed to decode instruction {:#0x}, fields: {:x?}",
+                        inst,
+                        fields
                     ),
                 }
             }
