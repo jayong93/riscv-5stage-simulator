@@ -23,6 +23,11 @@ pub struct Instruction {
 impl Instruction {
     /// Constructs a new `Instruction`.
     pub fn new(value: u32) -> Instruction {
+        // convert unnecessary instruction to NOP
+        if let 0x003027f3 | 0x00351073 = value {
+            return Default::default()
+        }
+
         let opcode: Opcode = value.into();
         let format = opcode.into();
         let fields = Fields::new(value, format, opcode);
