@@ -120,19 +120,19 @@ impl ProcessMemory {
         let arg_values = [1u32, program_name_addr, 0u32, 0u32];
 
         // align stack pointer
-        let aux_vecs_num_bytes = (size_of::<AuxVec>() * aux_vecs.len()) as u32;
-        let arg_values_num_bytes = (size_of::<u32>() * arg_values.len()) as u32;
-        let total_bytes = aux_vecs_num_bytes + arg_values_num_bytes;
+        let aux_vecs_bytes_num = (size_of::<AuxVec>() * aux_vecs.len()) as u32;
+        let arg_values_bytes_num = (size_of::<u32>() * arg_values.len()) as u32;
+        let total_bytes = aux_vecs_bytes_num + arg_values_bytes_num;
         let next_sp = sp - total_bytes;
         let sp = sp - (next_sp - (next_sp & (-16i32 as u32)));
 
         let sp = {
-            let sp = sp.wrapping_sub(aux_vecs_num_bytes);
+            let sp = sp.wrapping_sub(aux_vecs_bytes_num);
             self.write_slice(sp, aux_vecs.as_ref());
             sp
         };
         let sp = {
-            let sp = sp.wrapping_sub(arg_values_num_bytes);
+            let sp = sp.wrapping_sub(arg_values_bytes_num);
             self.write_slice(sp, arg_values.as_ref());
             sp
         };
@@ -157,30 +157,6 @@ impl ProcessMemory {
         let name_bytes = name_cstring.as_bytes_with_nul();
         let sp = sp.wrapping_sub(name_bytes.len() as u32);
         self.write_slice(sp, name_bytes);
-        sp
-    }
-
-    fn push_aux_vecs(
-        &mut self,
-        header_addr: u32,
-        header_num: u32,
-        info_block_addr: u32,
-        entry_point: u32,
-        sp: u32,
-    ) -> u32 {
-        use self::consts::*;
-        let aux_vecs : Vec<_> = [
-            (AT_ENTRY, entry_point),
-            (AT_PHNUM, header_num),
-            (AT_PHENT, size_of::<Elf32ProgramHeader>() as u32),
-            (AT_PHDR, header_addr),
-            (AT_PAGESZ, 0),
-            (AT_SECURE, 0),
-            (AT_RANDOM, info_block_addr),
-            (AT_NULL, 0),
-        ].iter().map(|(t, d)| AuxVec::new(*t, *d)).collect();
-        let sp = sp.wrapping_sub((size_of::<AuxVec>() * aux_vecs.len()) as u32);
-        self.write_slice(sp, aux_vecs.as_slice());
         sp
     }
 
