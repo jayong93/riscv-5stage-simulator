@@ -129,6 +129,14 @@ impl Pipeline {
                 let ret_val: u32 = match self.reg.gpr[consts::SYSCALL_NUM_REG]
                     .read()
                 {
+                    64 => {
+                        let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read() as i32;
+                        let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                        let count = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
+                        let bytes = self.memory.read_bytes(buf_addr, count as usize);
+
+                        nix::unistd::write(fd, bytes).unwrap() as u32
+                    }
                     78 => {
                         let buf_addr = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
                         let buf_size = self.reg.gpr[consts::SYSCALL_ARG4_REG].read();
@@ -140,6 +148,14 @@ impl Pipeline {
                         let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
                         let contents = nix::fcntl::readlinkat(fd as i32, path_str, buf).expect("Can't call readlinkat system call");
                         contents.len() as u32
+                    }
+                    80 => {
+                        let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                        let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                        let stat = nix::sys::stat::fstat(fd as i32).unwrap();
+                        
+                        self.memory.write(buf_addr, stat);
+                        0
                     }
                     160 => {
                         let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
@@ -163,9 +179,6 @@ impl Pipeline {
                             self.memory.v_address_range.1 = addr + 1;
                         }
                         addr
-                    }
-                    222 => {
-                        unimplemented!()
                     }
                     a => panic!("(in {:x})system call #{} is not implemented yet", self.id_ex.pc, a),
                 };
