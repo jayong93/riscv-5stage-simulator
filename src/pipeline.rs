@@ -48,18 +48,19 @@ impl Pipeline {
     }
 
     // return true when process ends.
-    pub fn run_clock(&mut self) {
-        self.write_back();
+    pub fn run_clock(&mut self) -> MemWbRegister {
+        let mem_wb_rg = self.write_back();
         if self.memory_access() {
-            return;
+            return mem_wb_rg;
         }
         if self.execute() {
-            return;
+            return mem_wb_rg;
         }
         if self.decode() {
-            return;
+            return mem_wb_rg;
         }
         self.fetch();
+        mem_wb_rg
     }
 
     fn fetch(&mut self) {
@@ -222,7 +223,7 @@ impl Pipeline {
                 false
             }
             Load => {
-                if self.ex_mem.remaining_clock > 0 {
+                if self.ex_mem.remaining_clock > 1 {
                     self.ex_mem.remaining_clock -= 1;
                     self.mem_wb = Default::default();
                     return true;
@@ -239,13 +240,18 @@ impl Pipeline {
                 false
             }
             Store => {
-                if self.ex_mem.remaining_clock > 0 {
+                if self.ex_mem.remaining_clock > 1 {
                     self.ex_mem.remaining_clock -= 1;
                     self.mem_wb = Default::default();
                     return true;
                 }
                 let addr = self.ex_mem.alu_result as u32;
-                self.memory.write(addr, self.ex_mem.B as u32);
+                match self.ex_mem.inst.function {
+                    Function::Sb => self.memory.write(addr, self.ex_mem.B as u8),
+                    Function::Sh => self.memory.write(addr, self.ex_mem.B as u16),
+                    Function::Sw => self.memory.write(addr, self.ex_mem.B as u32),
+                    _ => unreachable!(),
+                }
                 false
             }
             Amo => {
@@ -255,7 +261,7 @@ impl Pipeline {
                         self.ex_mem.pc, self.ex_mem.inst
                     );
                 }
-                if self.ex_mem.remaining_clock > 0 {
+                if self.ex_mem.remaining_clock > 1 {
                     self.ex_mem.remaining_clock -= 1;
                     self.mem_wb = Default::default();
                     return true;
@@ -309,10 +315,9 @@ impl Pipeline {
         is_stall
     }
 
-    fn write_back(&mut self) {
+    fn write_back(&mut self) -> MemWbRegister {
         use consts;
         use instruction::Opcode;
-
         {
             let mem_wb = &self.mem_wb;
             let inst = &mem_wb.inst;
@@ -345,7 +350,9 @@ impl Pipeline {
             }
         }
 
-        self.mem_wb = Default::default();
+        let mut new_reg = MemWbRegister::default();
+        std::mem::swap(&mut self.mem_wb, &mut new_reg);
+        new_reg
     }
 
     fn get_register_with_forwarding(

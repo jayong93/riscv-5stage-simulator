@@ -95,26 +95,47 @@ impl ProcessMemory {
         program_name: &str,
         entry_point: u32,
     ) {
+        use self::consts::*;
+
         self.stack.resize(stack_size as usize, 0);
         self.stack_range = (0u32.wrapping_sub(stack_size), 0);
 
         let sp = 0u32;
-        // push program headers, argument strings
         let (sp, header_num) =
             self.push_program_headers(program_headers, sp);
         let header_addr = sp;
         let sp = self.push_program_name(program_name, sp);
         let program_name_addr = sp;
-        // push Aux vecs
-        let sp = self.push_aux_vecs(header_addr, header_num, program_name_addr, entry_point, sp);
-        let sp = [0u32, 0u32, program_name_addr, 1u32].iter().fold(
-            sp,
-            |sp, val| {
-                let sp = sp.wrapping_sub(size_of::<u32>() as u32);
-                self.write(sp, *val);
-                sp
-            },
-        );
+
+        let aux_vecs = [
+            AuxVec::new(AT_ENTRY, entry_point),
+            AuxVec::new(AT_PHNUM, header_num),
+            AuxVec::new(AT_PHENT, size_of::<Elf32ProgramHeader>() as u32),
+            AuxVec::new(AT_PHDR, header_addr),
+            AuxVec::new(AT_PAGESZ, 0),
+            AuxVec::new(AT_SECURE, 0),
+            AuxVec::new(AT_RANDOM, program_name_addr),
+            AuxVec::new(AT_NULL, 0),
+        ];
+        let arg_values = [1u32, program_name_addr, 0u32, 0u32];
+
+        // align stack pointer
+        let aux_vecs_num_bytes = (size_of::<AuxVec>() * aux_vecs.len()) as u32;
+        let arg_values_num_bytes = (size_of::<u32>() * arg_values.len()) as u32;
+        let total_bytes = aux_vecs_num_bytes + arg_values_num_bytes;
+        let next_sp = sp - total_bytes;
+        let sp = sp - (next_sp - (next_sp & (-16i32 as u32)));
+
+        let sp = {
+            let sp = sp.wrapping_sub(aux_vecs_num_bytes);
+            self.write_slice(sp, aux_vecs.as_ref());
+            sp
+        };
+        let sp = {
+            let sp = sp.wrapping_sub(arg_values_num_bytes);
+            self.write_slice(sp, arg_values.as_ref());
+            sp
+        };
 
         self.stack_pointer_init = sp;
     }
@@ -265,90 +286,39 @@ mod tests {
     use super::*;
     use std::io::Read;
 
-    const TEST_BINARY: &'static str = "tests/hello";
-
-    #[test]
-    fn test_reading_elf() {
-        let mut elf_data = Vec::new();
-        let _ = std::fs::File::open(TEST_BINARY)
-            .unwrap()
-            .read_to_end(&mut elf_data)
-            .unwrap();
-        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
-        let image = ProcessMemory::new(&elf, &elf_data, TEST_BINARY);
-        let entry_point = elf.entry as u32;
-        assert_eq!(image.v_address_range.0, 0x10000);
-        assert_eq!(image.v_address_range.1, 0x7fd08 + 0x1e0c);
-        assert_eq!(image.read_only_range.0, 0x10000);
-        assert_eq!(image.read_only_range.1, 0x10000 + 0x6dd46);
-        assert_eq!(entry_point, 0x10338);
-        assert_eq!(image.data.len(), 0x7fd08 + 0x1e0c - 0x10000);
+    fn init_memory() -> ProcessMemory {
+        let mut memory = ProcessMemory::default();
+        memory.initialize_stack(8*1024*1024, &[], "test_bin", 0);
+        memory
     }
 
     #[test]
     fn test_reading_memory() {
-        let mut elf_data = Vec::new();
-        let _ = std::fs::File::open(TEST_BINARY)
-            .unwrap()
-            .read_to_end(&mut elf_data)
-            .unwrap();
-        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
-        let image = ProcessMemory::new(&elf, &elf_data, TEST_BINARY);
-        let entry_point = elf.entry as u32;
+        let mut memory = init_memory();
 
-        assert_eq!(image.read_inst(entry_point), 0x034000ef);
-        let str_bytes = (0x625b0..0x625b0 + 13)
-            .map(|addr| image.read::<u8>(addr))
-            .collect::<Vec<u8>>();
-        assert_eq!(String::from_utf8(str_bytes).unwrap(), "Hello, World!");
+        let mem_len = memory.stack.len();
+        memory.stack[mem_len-1] = 10;
+        memory.stack[mem_len-2] = 20;
+        assert_eq!(memory.read::<u8>(-1i32 as u32), 10);
+        assert_eq!(memory.read_bytes(-2i32 as u32, 2), &[20, 10]);
+        memory.stack[mem_len-1] = 0x10;
+        memory.stack[mem_len-2] = 0x20;
+        assert_eq!(memory.read::<u16>(-2i32 as u32), 0x1020);
     }
 
     #[test]
     fn test_writing_memory() {
-        let mut elf_data = Vec::new();
-        let _ = std::fs::File::open(TEST_BINARY)
-            .unwrap()
-            .read_to_end(&mut elf_data)
-            .unwrap();
-        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
-        let mut image = ProcessMemory::new(&elf, &elf_data, TEST_BINARY);
+        let mut memory = init_memory();
+        memory.write(-4i32 as u32, 600u32);
+        assert_eq!(memory.read::<u32>(-4i32 as u32), 600);
+        memory.write(-8i32 as u32, 0x12345678u32);
+        assert_eq!(memory.read_bytes(-8i32 as u32, 4), &[0x78, 0x56, 0x34, 0x12]);
 
-        image.write(0x7fd08, b'A');
-        let result: char = image.read::<u8>(0x7fd08).into();
-        assert_eq!(result, 'A');
-        image.write(0x80000, 100u32);
-        assert_eq!(image.read::<u32>(0x80000), 100);
-        image.write(0x80000, -10i8);
-        assert_eq!(image.read::<i8>(0x80000), -10);
-        image.write(0x80000, 3.14f32);
-        assert_eq!(image.read::<f32>(0x80000), 3.14);
-    }
+        memory.write(-8i32 as u32, 0xABCDu16);
+        assert_eq!(memory.read_bytes(-8i32 as u32, 4), &[0xCD, 0xAB, 0x34, 0x12]);
 
-    #[test]
-    #[should_panic]
-    fn test_writing_to_read_only_memory() {
-        let mut elf_data = Vec::new();
-        let _ = std::fs::File::open(TEST_BINARY)
-            .unwrap()
-            .read_to_end(&mut elf_data)
-            .unwrap();
-        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
-        let mut image = ProcessMemory::new(&elf, &elf_data, TEST_BINARY);
-
-        image.write(0x20000, 100);
-    }
-
-    #[test]
-    fn test_rw_stack() {
-        let mut elf_data = Vec::new();
-        let _ = std::fs::File::open(TEST_BINARY)
-            .unwrap()
-            .read_to_end(&mut elf_data)
-            .unwrap();
-        let elf = goblin::elf::Elf::parse(&elf_data).unwrap();
-        let mut image = ProcessMemory::new(&elf, &elf_data, TEST_BINARY);
-
-        image.write(0u32.overflowing_sub(10).0, 911u32);
-        assert_eq!(image.read::<u32>(0u32.overflowing_sub(10).0), 911u32);
+        let arr = [1u8, 2, 3, 4];
+        memory.write_slice(-4i32 as u32, arr.as_ref());
+        assert_eq!(memory.read::<u32>(-4i32 as u32), 0x04030201);
     }
 }

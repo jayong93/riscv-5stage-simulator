@@ -1,4 +1,7 @@
+
 //! 32-bit register and RV32I register file.
+
+use std::fmt;
 
 /// A complete RV32I register file.
 ///
@@ -8,6 +11,16 @@ pub struct RegisterFile {
     pub pc: Register,
     pub gpr: [Register; 32],
     pub fpr: [Register; 32],
+}
+
+impl fmt::Display for RegisterFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[ ")?;
+        for (i, reg) in self.gpr.as_ref().iter().enumerate() {
+            write!(f, "#{}={:x}, ", i, reg.read())?;
+        }
+        write!(f, "]")
+    }
 }
 
 impl RegisterFile {

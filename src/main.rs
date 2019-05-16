@@ -35,15 +35,18 @@ fn main() {
     let mut clock_it = 1..;
     loop {
         let clock = clock_it.next().unwrap();
-        if pipeline.mem_wb.inst.value != consts::NOP {
+        let last_reg = pipeline.run_clock();
+        if last_reg.inst.value != consts::NOP {
             println!(
-                "Clock #{} | pc: {:x} | {:?}",
+                "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {:x?} | regs: {}",
                 clock,
-                pipeline.mem_wb.pc,
-                pipeline.mem_wb.inst
+                last_reg.pc,
+                last_reg.inst.value,
+                last_reg.inst.function,
+                last_reg.inst.fields,
+                pipeline.reg,
             );
         }
-        pipeline.run_clock();
         if pipeline.is_finished {
             break;
         }
