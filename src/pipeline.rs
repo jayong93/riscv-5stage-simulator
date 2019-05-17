@@ -100,7 +100,7 @@ impl Pipeline {
 
         self.id_ex.target_addr = match self.id_ex.inst.opcode {
             Branch | Jal => self.id_ex.imm + self.id_ex.pc as i32,
-            Jalr => self.id_ex.imm + self.id_ex.A as i32,
+            Jalr => (self.id_ex.imm + self.id_ex.A as i32) & (!0x1i32),
             _ => 0,
         } as u32;
 

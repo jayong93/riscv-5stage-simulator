@@ -103,7 +103,8 @@ impl Fields {
         };
         let shamt = match opcode {
             Opcode::Lui | Opcode::AuiPc => 0,
-            Opcode::Jal | Opcode::Jalr => 12,
+            Opcode::Jal => 11,
+            Opcode::Jalr => 20,
             Opcode::Branch => 19,
             _ => 20,
         };
