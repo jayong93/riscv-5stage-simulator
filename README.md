@@ -10,8 +10,17 @@ Organization and Design RISC-V Edition by Patterson and Hennessy.
 
 ### General usage:
 
- 1) Follow instructions at [rustup.rs](https://rustup.rs/) to install Rust stable for your platform.
- 2) Run with elf binary :
+1) Follow instructions at [rustup.rs](https://rustup.rs/) to install Rust stable for your platform.  
+    But, It only support linux and 32bit riscv binary, so you have to install `<channel>-<some 32bit arch>-unknown-linux-gnu` toolchain and build 32bit simulator binary.
+    For example, if your cpu architecture is x86_64(aka amd64), you would better do:
+    ```bash
+    rustup toolchain install stable-i686-unknown-linux-gnu
+    ```
+    You can get full list of toolchain target with:
+    ```bash
+    rustup target list
+    ```
+2) Run with elf binary :
     ```bash
     cd riscv-5stage-simulator
     cargo run path-for-elf
