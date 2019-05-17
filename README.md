@@ -11,7 +11,7 @@ Organization and Design RISC-V Edition by Patterson and Hennessy.
 ### General usage:
 
 1) Follow instructions at [rustup.rs](https://rustup.rs/) to install Rust stable for your platform.  
-    But, It only support linux and 32bit riscv binary, so you have to install `<channel>-<some 32bit arch>-unknown-linux-gnu` toolchain and build 32bit simulator binary.
+    But, It only support linux and 32bit riscv binary, so you have to install `<channel>-<some 32bit arch>-unknown-linux-gnu` rust toolchain and gcc-multilib for 32bit build.
     For example, if your cpu architecture is x86_64(aka amd64), you would better do:
     ```bash
     rustup toolchain install stable-i686-unknown-linux-gnu
