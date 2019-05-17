@@ -121,9 +121,10 @@ impl Pipeline {
             }
             self.ex_mem.pc = self.id_ex.pc;
             self.ex_mem.inst = self.id_ex.inst.clone();
-            if self.reg.gpr[consts::SYSCALL_NUM_REG].read() == 93 {
+            if let 93 | 94 = self.reg.gpr[consts::SYSCALL_NUM_REG].read() {
                 // It's exit system call!
                 self.is_finished = true;
+                return true
             } else {
                 // do syscall
                 let ret_val: u32 = match self.reg.gpr[consts::SYSCALL_NUM_REG]

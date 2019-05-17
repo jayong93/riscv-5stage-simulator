@@ -37,7 +37,7 @@ fn main() {
         let clock = clock_it.next().unwrap();
         let last_reg = pipeline.run_clock();
         if last_reg.inst.value != consts::NOP {
-            println!(
+            eprintln!(
                 "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {:x?} | regs: {}",
                 clock,
                 last_reg.pc,
