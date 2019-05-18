@@ -118,12 +118,12 @@ impl ProcessMemory {
 
         let sp = {
             let sp = sp.wrapping_sub(aux_vecs_bytes_num);
-            self.write_slice(sp, aux_vecs.as_ref());
+            self.write_slice(sp, aux_vecs.as_ref()).unwrap();
             sp
         };
         let sp = {
             let sp = sp.wrapping_sub(arg_values_bytes_num);
-            self.write_slice(sp, arg_values.as_ref());
+            self.write_slice(sp, arg_values.as_ref()).unwrap();
             sp
         };
 
@@ -133,7 +133,7 @@ impl ProcessMemory {
     fn push_program_headers(&mut self, headers: &[Elf32ProgramHeader], sp: u32) -> (u32, u32) {
         headers.iter().fold((sp, 0), |(sp, num), header| {
             let sp = sp.wrapping_sub(size_of::<Elf32ProgramHeader>() as u32);
-            self.write(sp, *header);
+            self.write(sp, *header).unwrap();
             (sp, num + 1)
         })
     }
@@ -142,7 +142,7 @@ impl ProcessMemory {
         let name_cstring = std::ffi::CString::new(name.to_owned()).unwrap();
         let name_bytes = name_cstring.as_bytes_with_nul();
         let sp = sp.wrapping_sub(name_bytes.len() as u32);
-        self.write_slice(sp, name_bytes);
+        self.write_slice(sp, name_bytes).unwrap();
         sp
     }
 
@@ -232,11 +232,10 @@ impl ProcessMemory {
         let ptr = value.as_ptr() as *const u8;
         let byte_slice = unsafe { std::slice::from_raw_parts(ptr, value.len() * data_size) };
 
-        // if addr <= 0x5b10 && 0x5b10 < addr + (data_size * value.len()) as u32 {
-        //     return Err(format!("DEBUG: write to 0x5b10 in {:x}, with value: {:?}. previous value: {:?}", addr, byte_slice, data));
-        // }
-        eprintln!("DEBUG: Store has occured in {:x}.", addr);
-        eprintln!("DEBUG: val: {:?}", byte_slice);
+        if unsafe { crate::PRINT_STORES } {
+            eprintln!("DEBUG: Store has occured in {:x}.", addr);
+            eprintln!("DEBUG: val: {:?}", byte_slice);
+        }
 
         data.copy_from_slice(byte_slice);
 
@@ -247,7 +246,6 @@ impl ProcessMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
 
     fn init_memory() -> ProcessMemory {
         let mut memory = ProcessMemory::default();
@@ -272,22 +270,22 @@ mod tests {
     #[test]
     fn test_writing_memory() {
         let mut memory = init_memory();
-        memory.write(-4i32 as u32, 600u32);
+        memory.write(-4i32 as u32, 600u32).unwrap();
         assert_eq!(memory.read::<u32>(-4i32 as u32), 600);
-        memory.write(-8i32 as u32, 0x12345678u32);
+        memory.write(-8i32 as u32, 0x12345678u32).unwrap();
         assert_eq!(
             memory.read_bytes(-8i32 as u32, 4),
             &[0x78, 0x56, 0x34, 0x12]
         );
 
-        memory.write(-8i32 as u32, 0xABCDu16);
+        memory.write(-8i32 as u32, 0xABCDu16).unwrap();
         assert_eq!(
             memory.read_bytes(-8i32 as u32, 4),
             &[0xCD, 0xAB, 0x34, 0x12]
         );
 
         let arr = [1u8, 2, 3, 4];
-        memory.write_slice(-4i32 as u32, arr.as_ref());
+        memory.write_slice(-4i32 as u32, arr.as_ref()).unwrap();
         assert_eq!(memory.read::<u32>(-4i32 as u32), 0x04030201);
     }
 }

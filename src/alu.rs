@@ -44,9 +44,9 @@ pub fn alu(func: &Function, input1: i32, input2: i32) -> i32 {
         Mulh => ((((input1 as i64) * (input2 as i64)) as u64) >> 32) as i32,
         Mulhu | Mulhsu => (((input1 as u64) * (input2 as u64)) >> 32) as i32,
         Div => input1 / input2,
-        Divu => ((input1 as u32).wrapping_div(input2 as u32)) as i32,
-        Rem => input1.wrapping_rem(input2),
-        Remu => ((input1 as u32).wrapping_rem(input2 as u32)) as i32,
+        Divu => ((input1 as u32) / (input2 as u32)) as i32,
+        Rem => input1 % input2,
+        Remu => ((input1 as u32) % (input2 as u32)) as i32,
         _ => 0,
     }
 }

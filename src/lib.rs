@@ -12,7 +12,8 @@ pub mod register;
 pub mod stages;
 
 extern crate goblin;
-extern crate regex;
 extern crate byteorder;
 extern crate num_traits;
 extern crate nix;
+
+pub static mut PRINT_STORES: bool = false;

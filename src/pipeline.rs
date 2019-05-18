@@ -131,7 +131,6 @@ impl Pipeline {
                         let count = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
                         let bytes = self.memory.read_bytes(buf_addr, count as usize);
 
-                        dbg!((buf_addr, count, bytes));
                         nix::unistd::write(fd, bytes).unwrap() as u32
                     }
                     78 => {
@@ -154,12 +153,18 @@ impl Pipeline {
                         let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
                         let stat = nix::sys::stat::fstat(fd as i32).unwrap();
 
-                        self.memory.write(buf_addr, stat);
+                        self.memory.write(buf_addr, stat).unwrap_or_else(|err| {
+                            panic!("{}, in {:?}, registers: {}", err, self.ex_mem, self.reg)
+                        });
                         0
                     }
                     160 => {
                         let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
-                        self.memory.write(addr, nix::sys::utsname::uname());
+                        self.memory
+                            .write(addr, nix::sys::utsname::uname())
+                            .unwrap_or_else(|err| {
+                                panic!("{}, in {:?}, registers: {}", err, self.ex_mem, self.reg)
+                            });
                         0
                     }
                     174 => nix::unistd::getuid().as_raw(),
