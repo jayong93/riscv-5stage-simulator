@@ -21,9 +21,9 @@ struct Opt {
     #[structopt(long = "print_steps")]
     /// Prints clocks and instruction infomations when the instruction is write-backed
     print_steps: bool,
-    #[structopt(long = "print_stores")]
-    /// Prints all store events
-    print_stores: bool,
+    #[structopt(long = "print_debug_info")]
+    /// Prints informations for debugging
+    print_debug_info: bool,
 }
 
 lazy_static! {
@@ -31,7 +31,7 @@ lazy_static! {
 }
 
 fn main() {
-    unsafe{ riscv_5stage_simulator::PRINT_STORES = OPTS.print_stores };
+    unsafe{ riscv_5stage_simulator::PRINT_DEBUG_INFO = OPTS.print_debug_info };
 
     let mut f_data = Vec::new();
     let process_image;
@@ -49,15 +49,18 @@ fn main() {
         let clock = clock_it.next().unwrap();
         let last_reg = pipeline.run_clock();
         if OPTS.print_steps && last_reg.inst.value != consts::NOP {
-            eprintln!(
-                "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {} | regs: {}",
+            eprint!(
+                "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
                 clock,
                 last_reg.pc,
                 last_reg.inst.value,
                 last_reg.inst.function,
                 last_reg.inst.fields,
-                pipeline.reg,
             );
+            if OPTS.print_debug_info {
+                eprint!(" | regs: {}", pipeline.reg)
+            }
+            eprintln!("");
         }
         if pipeline.is_finished {
             break;

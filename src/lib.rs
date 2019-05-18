@@ -16,4 +16,4 @@ extern crate byteorder;
 extern crate num_traits;
 extern crate nix;
 
-pub static mut PRINT_STORES: bool = false;
+pub static mut PRINT_DEBUG_INFO: bool = false;

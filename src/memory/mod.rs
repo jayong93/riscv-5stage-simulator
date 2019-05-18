@@ -232,7 +232,7 @@ impl ProcessMemory {
         let ptr = value.as_ptr() as *const u8;
         let byte_slice = unsafe { std::slice::from_raw_parts(ptr, value.len() * data_size) };
 
-        if unsafe { crate::PRINT_STORES } {
+        if unsafe { crate::PRINT_DEBUG_INFO } {
             eprintln!("DEBUG: Store has occured in {:x}.", addr);
             eprintln!("DEBUG: val: {:?}", byte_slice);
         }
