@@ -23,16 +23,13 @@ Organization and Design RISC-V Edition by Patterson and Hennessy.
 2) Run with elf binary :
     ```bash
     cd riscv-5stage-simulator
-    cargo run <path-for-elf>
-    # or
-    <path-to-casim-binary> <path-for-elf>
+    cargo +<toolchain-you-installed-above> build # build the simulator
+    target/debug/casim <path-for-elf>
     ```
 
     For more options:
     ```bash
-    cargo run -- --help
-    # or
-    <path-to-casim-binary> --help
+    target/debug/casim --help
     ```
 
 ## Licence
