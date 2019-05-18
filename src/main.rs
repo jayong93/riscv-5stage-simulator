@@ -20,8 +20,10 @@ struct Opt {
     #[structopt(parse(from_os_str))]
     elf_binary: PathBuf,
     #[structopt(long = "print_steps")]
+    /// Prints clocks and instruction infomations when the instruction is write-backed
     print_steps: bool,
     #[structopt(long = "print_stores")]
+    /// Prints all store events
     print_stores: bool,
 }
 
