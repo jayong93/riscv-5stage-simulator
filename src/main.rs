@@ -7,7 +7,6 @@ extern crate lazy_static;
 use riscv_5stage_simulator::consts;
 use riscv_5stage_simulator::memory::ProcessMemory;
 use riscv_5stage_simulator::pipeline::Pipeline;
-use std::env;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::PathBuf;
