@@ -25,7 +25,7 @@ impl Instruction {
     pub fn new(value: u32) -> Instruction {
         // convert unnecessary instruction to NOP
         if let 0x003027f3 | 0x00351073 = value {
-            return Default::default()
+            return Default::default();
         }
 
         let opcode: Opcode = value.into();
@@ -56,14 +56,14 @@ impl Default for Instruction {
 /// RISC-V 32I fields (shamt -> imm).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fields {
-    pub rs1: u8,
-    pub rs2: u8,
-    pub rs3: u8,
-    pub rd: u8,
-    pub funct2: u8,
-    pub funct3: u8,
-    pub funct7: u8,
-    pub imm: u32,
+    pub rs1: Option<u8>,
+    pub rs2: Option<u8>,
+    pub rs3: Option<u8>,
+    pub rd: Option<u8>,
+    pub funct2: Option<u8>,
+    pub funct3: Option<u8>,
+    pub funct7: Option<u8>,
+    pub imm: Option<u32>,
 }
 
 impl Fields {
@@ -78,10 +78,7 @@ impl Fields {
         let funct7 = ((inst & FUNCT7_MASK) >> FUNCT7_SHIFT) as u8;
         let imm = match format {
             Format::R => 0,
-            Format::I
-                if opcode == Opcode::OpImm
-                    && (funct3 == 0x1 || funct3 == 0x5) =>
-            {
+            Format::I if opcode == Opcode::OpImm && (funct3 == 0x1 || funct3 == 0x5) => {
                 (inst & RS2_MASK) >> RS2_SHIFT
             }
             Format::I => (inst & 0xfff00000) >> 20,
@@ -109,6 +106,51 @@ impl Fields {
             _ => 20,
         };
         let imm = (((imm as i32) << shamt) >> shamt) as u32;
+
+        let (rs1, rs2, rs3, rd, funct2, funct3, funct7, imm) = match format {
+            Format::R => (
+                Some(rs1),
+                Some(rs2),
+                None,
+                Some(rd),
+                None,
+                Some(funct3),
+                Some(funct7),
+                None,
+            ),
+            Format::R4 => (
+                Some(rs1),
+                Some(rs2),
+                Some(rs3),
+                Some(rd),
+                Some(funct2),
+                Some(funct3),
+                None,
+                None,
+            ),
+            Format::I => (
+                Some(rs1),
+                None,
+                None,
+                Some(rd),
+                None,
+                Some(funct3),
+                None,
+                Some(imm),
+            ),
+            Format::S | Format::B => (
+                Some(rs1),
+                Some(rs2),
+                None,
+                None,
+                None,
+                Some(funct3),
+                None,
+                Some(imm),
+            ),
+            Format::J | Format::U => (None, None, None, Some(rd), None, None, None, Some(imm)),
+        };
+
         Fields {
             rs1,
             rs2,
@@ -200,7 +242,9 @@ impl From<Opcode> for Format {
             Opcode::OpImm => Format::I,
             Opcode::MiscMem => Format::I,
             Opcode::System => Format::I,
-            Opcode::Fmadd | Opcode::Fmsub | Opcode::Fnmadd | Opcode::Fnmsub | Opcode::Amo => Format::R4,
+            Opcode::Fmadd | Opcode::Fmsub | Opcode::Fnmadd | Opcode::Fnmsub | Opcode::Amo => {
+                Format::R4
+            }
         }
     }
 }
@@ -356,86 +400,123 @@ impl Function {
             _ => {
                 // Check rest of functions
                 match (opcode, fields.funct3, fields.funct7) {
-                    (Opcode::Branch, 0b000, _) => Function::Beq,
-                    (Opcode::Branch, 0b001, _) => Function::Bne,
-                    (Opcode::Branch, 0b100, _) => Function::Blt,
-                    (Opcode::Branch, 0b101, _) => Function::Bge,
-                    (Opcode::Branch, 0b110, _) => Function::Bltu,
-                    (Opcode::Branch, 0b111, _) => Function::Bgeu,
-                    (Opcode::Load, 0b000, _) => Function::Lb,
-                    (Opcode::Load, 0b001, _) => Function::Lh,
-                    (Opcode::Load, 0b010, _) => Function::Lw,
-                    (Opcode::Load, 0b100, _) => Function::Lbu,
-                    (Opcode::Load, 0b101, _) => Function::Lhu,
-                    (Opcode::Store, 0b000, _) => Function::Sb,
-                    (Opcode::Store, 0b001, _) => Function::Sh,
-                    (Opcode::Store, 0b010, _) => Function::Sw,
-                    (Opcode::OpImm, 0b000, _) => Function::Addi,
-                    (Opcode::OpImm, 0b010, _) => Function::Slti,
-                    (Opcode::OpImm, 0b011, _) => Function::Sltiu,
-                    (Opcode::OpImm, 0b100, _) => Function::Xori,
-                    (Opcode::OpImm, 0b110, _) => Function::Ori,
-                    (Opcode::OpImm, 0b111, _) => Function::Andi,
-                    (Opcode::OpImm, 0b001, _) => Function::Slli,
-                    (Opcode::OpImm, 0b101, 0b0) => Function::Srli,
-                    (Opcode::OpImm, 0b101, 0b01_00000) => Function::Srai,
-                    (Opcode::Op, 0b000, 0b0) => Function::Add,
-                    (Opcode::Op, 0b000, 0b01_00000) => Function::Sub,
-                    (Opcode::Op, 0b001, 0b0) => Function::Sll,
-                    (Opcode::Op, 0b010, 0b0) => Function::Slt,
-                    (Opcode::Op, 0b011, 0b0) => Function::Sltu,
-                    (Opcode::Op, 0b100, 0b0) => Function::Xor,
-                    (Opcode::Op, 0b101, 0b0) => Function::Srl,
-                    (Opcode::Op, 0b101, 0b01_00000) => Function::Sra,
-                    (Opcode::Op, 0b110, 0b0) => Function::Or,
-                    (Opcode::Op, 0b111, 0b0) => Function::And,
-                    (Opcode::MiscMem, 0b000, _) => Function::Fence,
-                    (Opcode::MiscMem, 0b001, _) => Function::Fencei,
-                    (Opcode::System, 0b0, _) if fields.imm == 1 => Function::Ebreak,
-                    (Opcode::System, 0b0, _) => Function::Ecall,
-                    (Opcode::Op, 0b000, 0b1) => Function::Mul,
-                    (Opcode::Op, 0b001, 0b1) => Function::Mulh,
-                    (Opcode::Op, 0b010, 0b1) => Function::Mulhsu,
-                    (Opcode::Op, 0b011, 0b1) => Function::Mulhu,
-                    (Opcode::Op, 0b100, 0b1) => Function::Div,
-                    (Opcode::Op, 0b101, 0b1) => Function::Divu,
-                    (Opcode::Op, 0b110, 0b1) => Function::Rem,
-                    (Opcode::Op, 0b111, 0b1) => Function::Remu,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b00010 => Function::Lrw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b00011 => Function::Scw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b00001 => Function::Amoswapw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b00000 => Function::Amoaddw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b00100 => Function::Amoxorw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b01100 => Function::Amoandw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b01000 => Function::Amoorw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b10000 => Function::Amominw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b10100 => Function::Amomaxw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b11000 => Function::Amominuw,
-                    (Opcode::Amo, 0b010, _) if fields.rs3 == 0b11100 => Function::Amomaxuw,
-                    (Opcode::OpFp, _, 0b0) => Function::Fadds,
-                    (Opcode::OpFp, _, 0b100) => Function::Fsubs,
-                    (Opcode::OpFp, _, 0b1000) => Function::Fmuls,
-                    (Opcode::OpFp, _, 0b1100) => Function::Fdivs,
-                    (Opcode::OpFp, _, 0b010_1100) if fields.rs2 == 0b0 => Function::Fsqrts,
-                    (Opcode::OpFp, 0b000, 0b001_0000) => Function::Fsgnjs,
-                    (Opcode::OpFp, 0b001, 0b001_0000) => Function::Fsgnjns,
-                    (Opcode::OpFp, 0b010, 0b001_0000) => Function::Fsgnjxs,
-                    (Opcode::OpFp, 0b000, 0b001_0100) => Function::Fmins,
-                    (Opcode::OpFp, 0b001, 0b001_0100) => Function::Fmaxs,
-                    (Opcode::OpFp, _, 0b110_0000) if fields.rs2 == 0b1 => Function::Fcvtwus,
-                    (Opcode::OpFp, _, 0b110_0000) => Function::Fcvtws,
-                    (Opcode::OpFp, 0b000, 0b111_0000) if fields.rs2 == 0b0 => Function::Fmvxw,
-                    (Opcode::OpFp, 0b010, 0b101_0000) => Function::Feqs,
-                    (Opcode::OpFp, 0b001, 0b101_0000) => Function::Flts,
-                    (Opcode::OpFp, 0b000, 0b101_0000) => Function::Fles,
-                    (Opcode::OpFp, 0b001, 0b111_0000) if fields.rs2 == 0b0 => Function::Fclasss,
-                    (Opcode::OpFp, _, 0b110_1000) if fields.rs2 == 0b1 => Function::Fcvtswu,
-                    (Opcode::OpFp, _, 0b110_1000) => Function::Fcvtsw,
-                    (Opcode::OpFp, 0b000, 0b111_1000) if fields.rs2 == 0b0 => Function::Fmvwx,
+                    (Opcode::Branch, Some(0b000), _) => Function::Beq,
+                    (Opcode::Branch, Some(0b001), _) => Function::Bne,
+                    (Opcode::Branch, Some(0b100), _) => Function::Blt,
+                    (Opcode::Branch, Some(0b101), _) => Function::Bge,
+                    (Opcode::Branch, Some(0b110), _) => Function::Bltu,
+                    (Opcode::Branch, Some(0b111), _) => Function::Bgeu,
+                    (Opcode::Load, Some(0b000), _) => Function::Lb,
+                    (Opcode::Load, Some(0b001), _) => Function::Lh,
+                    (Opcode::Load, Some(0b010), _) => Function::Lw,
+                    (Opcode::Load, Some(0b100), _) => Function::Lbu,
+                    (Opcode::Load, Some(0b101), _) => Function::Lhu,
+                    (Opcode::Store, Some(0b000), _) => Function::Sb,
+                    (Opcode::Store, Some(0b001), _) => Function::Sh,
+                    (Opcode::Store, Some(0b010), _) => Function::Sw,
+                    (Opcode::OpImm, Some(0b000), _) => Function::Addi,
+                    (Opcode::OpImm, Some(0b010), _) => Function::Slti,
+                    (Opcode::OpImm, Some(0b011), _) => Function::Sltiu,
+                    (Opcode::OpImm, Some(0b100), _) => Function::Xori,
+                    (Opcode::OpImm, Some(0b110), _) => Function::Ori,
+                    (Opcode::OpImm, Some(0b111), _) => Function::Andi,
+                    (Opcode::OpImm, Some(0b001), _) => Function::Slli,
+                    (Opcode::OpImm, Some(0b101), _)
+                        if (inst & consts::FUNCT7_MASK) >> consts::FUNCT7_SHIFT == 0 =>
+                    {
+                        Function::Srli
+                    }
+                    (Opcode::OpImm, Some(0b101), _)
+                        if (inst & consts::FUNCT7_MASK) >> consts::FUNCT7_SHIFT == 0b01_00000 =>
+                    {
+                        Function::Srai
+                    }
+                    (Opcode::Op, Some(0b000), Some(0b0)) => Function::Add,
+                    (Opcode::Op, Some(0b000), Some(0b01_00000)) => Function::Sub,
+                    (Opcode::Op, Some(0b001), Some(0b0)) => Function::Sll,
+                    (Opcode::Op, Some(0b010), Some(0b0)) => Function::Slt,
+                    (Opcode::Op, Some(0b011), Some(0b0)) => Function::Sltu,
+                    (Opcode::Op, Some(0b100), Some(0b0)) => Function::Xor,
+                    (Opcode::Op, Some(0b101), Some(0b0)) => Function::Srl,
+                    (Opcode::Op, Some(0b101), Some(0b01_00000)) => Function::Sra,
+                    (Opcode::Op, Some(0b110), Some(0b0)) => Function::Or,
+                    (Opcode::Op, Some(0b111), Some(0b0)) => Function::And,
+                    (Opcode::MiscMem, Some(0b000), _) => Function::Fence,
+                    (Opcode::MiscMem, Some(0b001), _) => Function::Fencei,
+                    (Opcode::System, Some(0b0), _) if fields.imm == Some(1) => Function::Ebreak,
+                    (Opcode::System, Some(0b0), _) => Function::Ecall,
+                    (Opcode::Op, Some(0b000), Some(0b1)) => Function::Mul,
+                    (Opcode::Op, Some(0b001), Some(0b1)) => Function::Mulh,
+                    (Opcode::Op, Some(0b010), Some(0b1)) => Function::Mulhsu,
+                    (Opcode::Op, Some(0b011), Some(0b1)) => Function::Mulhu,
+                    (Opcode::Op, Some(0b100), Some(0b1)) => Function::Div,
+                    (Opcode::Op, Some(0b101), Some(0b1)) => Function::Divu,
+                    (Opcode::Op, Some(0b110), Some(0b1)) => Function::Rem,
+                    (Opcode::Op, Some(0b111), Some(0b1)) => Function::Remu,
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b00010) => Function::Lrw,
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b00011) => Function::Scw,
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b00001) => {
+                        Function::Amoswapw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b00000) => {
+                        Function::Amoaddw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b00100) => {
+                        Function::Amoxorw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b01100) => {
+                        Function::Amoandw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b01000) => {
+                        Function::Amoorw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b10000) => {
+                        Function::Amominw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b10100) => {
+                        Function::Amomaxw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b11000) => {
+                        Function::Amominuw
+                    }
+                    (Opcode::Amo, Some(0b010), _) if fields.rs3 == Some(0b11100) => {
+                        Function::Amomaxuw
+                    }
+                    (Opcode::OpFp, _, Some(0b0)) => Function::Fadds,
+                    (Opcode::OpFp, _, Some(0b100)) => Function::Fsubs,
+                    (Opcode::OpFp, _, Some(0b1000)) => Function::Fmuls,
+                    (Opcode::OpFp, _, Some(0b1100)) => Function::Fdivs,
+                    (Opcode::OpFp, _, Some(0b010_1100)) if fields.rs2 == Some(0b0) => {
+                        Function::Fsqrts
+                    }
+                    (Opcode::OpFp, Some(0b000), Some(0b001_0000)) => Function::Fsgnjs,
+                    (Opcode::OpFp, Some(0b001), Some(0b001_0000)) => Function::Fsgnjns,
+                    (Opcode::OpFp, Some(0b010), Some(0b001_0000)) => Function::Fsgnjxs,
+                    (Opcode::OpFp, Some(0b000), Some(0b001_0100)) => Function::Fmins,
+                    (Opcode::OpFp, Some(0b001), Some(0b001_0100)) => Function::Fmaxs,
+                    (Opcode::OpFp, _, Some(0b110_0000)) if fields.rs2 == Some(0b1) => {
+                        Function::Fcvtwus
+                    }
+                    (Opcode::OpFp, _, Some(0b110_0000)) => Function::Fcvtws,
+                    (Opcode::OpFp, Some(0b000), Some(0b111_0000)) if fields.rs2 == Some(0b0) => {
+                        Function::Fmvxw
+                    }
+                    (Opcode::OpFp, Some(0b010), Some(0b101_0000)) => Function::Feqs,
+                    (Opcode::OpFp, Some(0b001), Some(0b101_0000)) => Function::Flts,
+                    (Opcode::OpFp, Some(0b000), Some(0b101_0000)) => Function::Fles,
+                    (Opcode::OpFp, Some(0b001), Some(0b111_0000)) if fields.rs2 == Some(0b0) => {
+                        Function::Fclasss
+                    }
+                    (Opcode::OpFp, _, Some(0b110_1000)) if fields.rs2 == Some(0b1) => {
+                        Function::Fcvtswu
+                    }
+                    (Opcode::OpFp, _, Some(0b110_1000)) => Function::Fcvtsw,
+                    (Opcode::OpFp, Some(0b000), Some(0b111_1000)) if fields.rs2 == Some(0b0) => {
+                        Function::Fmvwx
+                    }
                     _ => panic!(
                         "Failed to decode instruction {:#0x}, fields: {:x?}",
-                        inst,
-                        fields
+                        inst, fields
                     ),
                 }
             }
@@ -451,10 +532,10 @@ mod tests {
     #[test]
     fn nop() {
         let insn = Instruction::default();
-        assert_eq!(insn.fields.rd, 0);
-        assert_eq!(insn.fields.rs1, 0);
-        assert_eq!(insn.fields.rs2, 0);
-        assert_eq!(insn.fields.imm, 0);
+        assert_eq!(insn.function, Function::Addi);
+        assert_eq!(insn.fields.rd, Some(0));
+        assert_eq!(insn.fields.rs1, Some(0));
+        assert_eq!(insn.fields.imm, Some(0));
     }
 
 }

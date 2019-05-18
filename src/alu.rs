@@ -15,20 +15,23 @@ pub fn alu(func: &Function, input1: i32, input2: i32) -> i32 {
             } else {
                 0
             }
-        },
+        }
         Sltu | Sltiu => {
             if (input1 as u32) < (input2 as u32) {
                 1
             } else {
                 0
             }
-        },
+        }
         And | Andi => input1 & input2,
         Or | Ori => input1 | input2,
         Xor | Xori => input1 ^ input2,
-        Sll | Slli => ((input1 as u32).wrapping_shl(input2 as u32)) as i32,
-        Srl | Srli => ((input1 as u32).wrapping_shr(input2 as u32)) as i32,
-        Sra | Srai => input1.wrapping_shr(input2 as u32),
+        Sll => ((input1 as u32) << (input2 as u32 & 0x1f)) as i32,
+        Slli => ((input1 as u32) << (input2 as u32)) as i32,
+        Srl => ((input1 as u32) >> (input2 as u32 & 0x1f)) as i32,
+        Srli => ((input1 as u32) >> (input2 as u32)) as i32,
+        Sra => input1 >> (input2 as u32 & 0x1f),
+        Srai => input1 >> (input2 as u32),
         Lui => input2,
         Beq => (input1 == input2) as i32,
         Bne => (input1 != input2) as i32,
@@ -44,6 +47,6 @@ pub fn alu(func: &Function, input1: i32, input2: i32) -> i32 {
         Divu => ((input1 as u32).wrapping_div(input2 as u32)) as i32,
         Rem => input1.wrapping_rem(input2),
         Remu => ((input1 as u32).wrapping_rem(input2 as u32)) as i32,
-        _ => 0
+        _ => 0,
     }
 }

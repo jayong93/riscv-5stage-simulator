@@ -1,4 +1,3 @@
-
 //! 32-bit register and RV32I register file.
 
 use std::fmt;

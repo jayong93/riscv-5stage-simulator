@@ -3,9 +3,9 @@
 extern crate env_logger;
 extern crate riscv_5stage_simulator;
 
+use riscv_5stage_simulator::consts;
 use riscv_5stage_simulator::memory::ProcessMemory;
 use riscv_5stage_simulator::pipeline::Pipeline;
-use riscv_5stage_simulator::consts;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -22,8 +22,7 @@ fn main() {
     if let Some(filename) = args.get(1) {
         let mut f = File::open(filename).expect("error opening file");
         f.read_to_end(&mut f_data).expect("Can't read from a file");
-        elf = goblin::elf::Elf::parse(&f_data)
-            .expect("It's not a elf binary file");
+        elf = goblin::elf::Elf::parse(&f_data).expect("It's not a elf binary file");
         process_image = ProcessMemory::new(&elf, &f_data, filename);
     } else {
         println!("Usage: {} <filename>", program_name);

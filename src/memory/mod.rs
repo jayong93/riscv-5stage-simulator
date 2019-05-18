@@ -29,17 +29,11 @@ pub struct ProcessMemory {
 }
 
 impl ProcessMemory {
-    pub fn new(
-        elf_struct: &goblin::elf::Elf,
-        elf_data: &[u8],
-        program_name: &str,
-    ) -> Self {
+    pub fn new(elf_struct: &goblin::elf::Elf, elf_data: &[u8], program_name: &str) -> Self {
         let mut memory = elf_struct
             .program_headers
             .iter()
-            .filter(|header| {
-                header.p_type == goblin::elf::program_header::PT_LOAD
-            })
+            .filter(|header| header.p_type == goblin::elf::program_header::PT_LOAD)
             .fold(ProcessMemory::default(), |mut memory, header| {
                 let vm_range = header.vm_range();
                 if !header.is_write() {
@@ -58,10 +52,7 @@ impl ProcessMemory {
                     let old_size = memory.data.len();
                     if memory.v_address_range.1 < vm_range.start as u32 {
                         memory.data.resize(
-                            old_size
-                                + (vm_range.start as u32
-                                    - memory.v_address_range.1)
-                                    as usize,
+                            old_size + (vm_range.start as u32 - memory.v_address_range.1) as usize,
                             0,
                         );
                     }
@@ -101,8 +92,7 @@ impl ProcessMemory {
         self.stack_range = (0u32.wrapping_sub(stack_size), 0);
 
         let sp = 0u32;
-        let (sp, header_num) =
-            self.push_program_headers(program_headers, sp);
+        let (sp, header_num) = self.push_program_headers(program_headers, sp);
         let header_addr = sp;
         let sp = self.push_program_name(program_name, sp);
         let program_name_addr = sp;
@@ -140,15 +130,11 @@ impl ProcessMemory {
         self.stack_pointer_init = sp;
     }
 
-    fn push_program_headers(
-        &mut self,
-        headers: &[Elf32ProgramHeader],
-        sp: u32,
-    ) -> (u32, u32) {
+    fn push_program_headers(&mut self, headers: &[Elf32ProgramHeader], sp: u32) -> (u32, u32) {
         headers.iter().fold((sp, 0), |(sp, num), header| {
             let sp = sp.wrapping_sub(size_of::<Elf32ProgramHeader>() as u32);
             self.write(sp, *header);
-            (sp, num+1)
+            (sp, num + 1)
         })
     }
 
@@ -160,22 +146,26 @@ impl ProcessMemory {
         sp
     }
 
-    fn check_address_space(&self, addr: u32) {
+    fn check_address_space(&self, addr: u32) -> Result<(), String> {
         if addr < self.v_address_range.0
             || (addr >= self.v_address_range.1 && addr < self.stack_range.0)
         {
-            panic!("{:x} is out of address range.", addr);
+            Err(format!("{:x} is out of address range.", addr))
+        } else {
+            Ok(())
         }
     }
 
-    fn check_write_address_space(&self, addr: u32) {
+    fn check_write_address_space(&self, addr: u32) -> Result<(), String> {
         if self.read_only_range.0 <= addr && addr < self.read_only_range.1 {
-            panic!("{:x} is out of writable address range.", addr);
+            Err(format!("{:x} is out of writable address range.", addr))
+        } else {
+            Ok(())
         }
     }
 
     pub fn read_inst(&self, addr: u32) -> u32 {
-        self.check_address_space(addr);
+        self.check_address_space(addr).unwrap();
 
         let offset = (addr - self.v_address_range.0) as usize;
         let mut data = &(self.data[offset..offset + 4]);
@@ -190,7 +180,7 @@ impl ProcessMemory {
     }
 
     pub fn read_bytes(&self, addr: u32, size: usize) -> &[u8] {
-        self.check_address_space(addr);
+        self.check_address_space(addr).unwrap();
 
         let buf;
         let offset = if addr < self.stack_range.0 {
@@ -204,7 +194,7 @@ impl ProcessMemory {
     }
 
     pub fn read_bytes_mut(&mut self, addr: u32, size: usize) -> &mut [u8] {
-        self.check_address_space(addr);
+        self.check_address_space(addr).unwrap();
 
         let buf;
         let offset = if addr < self.stack_range.0 {
@@ -217,29 +207,19 @@ impl ProcessMemory {
         &mut buf[offset..offset + size]
     }
 
-    pub fn write<T>(&mut self, addr: u32, value: T) {
-        self.check_address_space(addr);
-        self.check_write_address_space(addr);
-
+    pub fn write<T>(&mut self, addr: u32, value: T) -> Result<(), String> {
         let data_size = size_of::<T>() as usize;
-        let data;
-        if addr < self.stack_range.0 {
-            let offset = (addr - self.v_address_range.0) as usize;
-            data = &mut (self.data[offset..offset + data_size]);
-        } else {
-            let offset = (addr - self.stack_range.0) as usize;
-            data = &mut (self.stack[offset..offset + data_size]);
-        }
         let ptr = &value as *const T as *const u8;
         let byte_slice = unsafe { std::slice::from_raw_parts(ptr, data_size) };
-        data.copy_from_slice(byte_slice);
+        self.write_slice(addr, byte_slice)
     }
 
-    pub fn write_slice<T>(&mut self, addr: u32, value: &[T]) {
-        self.check_address_space(addr);
-        self.check_write_address_space(addr);
+    pub fn write_slice<T>(&mut self, addr: u32, value: &[T]) -> Result<(), String> {
+        self.check_address_space(addr)?;
+        self.check_write_address_space(addr)?;
 
         let data_size = size_of::<T>();
+
         let data;
         if addr < self.stack_range.0 {
             let offset = (addr - self.v_address_range.0) as usize;
@@ -250,10 +230,15 @@ impl ProcessMemory {
         }
 
         let ptr = value.as_ptr() as *const u8;
-        let byte_slice = unsafe {
-            std::slice::from_raw_parts(ptr, value.len() * data_size)
-        };
+        let byte_slice = unsafe { std::slice::from_raw_parts(ptr, value.len() * data_size) };
+
+        // if addr <= 0x5b10 && 0x5b10 < addr + (data_size * value.len()) as u32 {
+        //     return Err(format!("DEBUG: write to 0x5b10 in {:x}, with value: {:?}. previous value: {:?}", addr, byte_slice, data));
+        // }
+
         data.copy_from_slice(byte_slice);
+
+        Ok(())
     }
 }
 
@@ -264,7 +249,7 @@ mod tests {
 
     fn init_memory() -> ProcessMemory {
         let mut memory = ProcessMemory::default();
-        memory.initialize_stack(8*1024*1024, &[], "test_bin", 0);
+        memory.initialize_stack(8 * 1024 * 1024, &[], "test_bin", 0);
         memory
     }
 
@@ -273,12 +258,12 @@ mod tests {
         let mut memory = init_memory();
 
         let mem_len = memory.stack.len();
-        memory.stack[mem_len-1] = 10;
-        memory.stack[mem_len-2] = 20;
+        memory.stack[mem_len - 1] = 10;
+        memory.stack[mem_len - 2] = 20;
         assert_eq!(memory.read::<u8>(-1i32 as u32), 10);
         assert_eq!(memory.read_bytes(-2i32 as u32, 2), &[20, 10]);
-        memory.stack[mem_len-1] = 0x10;
-        memory.stack[mem_len-2] = 0x20;
+        memory.stack[mem_len - 1] = 0x10;
+        memory.stack[mem_len - 2] = 0x20;
         assert_eq!(memory.read::<u16>(-2i32 as u32), 0x1020);
     }
 
@@ -288,10 +273,16 @@ mod tests {
         memory.write(-4i32 as u32, 600u32);
         assert_eq!(memory.read::<u32>(-4i32 as u32), 600);
         memory.write(-8i32 as u32, 0x12345678u32);
-        assert_eq!(memory.read_bytes(-8i32 as u32, 4), &[0x78, 0x56, 0x34, 0x12]);
+        assert_eq!(
+            memory.read_bytes(-8i32 as u32, 4),
+            &[0x78, 0x56, 0x34, 0x12]
+        );
 
         memory.write(-8i32 as u32, 0xABCDu16);
-        assert_eq!(memory.read_bytes(-8i32 as u32, 4), &[0xCD, 0xAB, 0x34, 0x12]);
+        assert_eq!(
+            memory.read_bytes(-8i32 as u32, 4),
+            &[0xCD, 0xAB, 0x34, 0x12]
+        );
 
         let arr = [1u8, 2, 3, 4];
         memory.write_slice(-4i32 as u32, arr.as_ref());

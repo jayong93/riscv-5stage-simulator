@@ -1,3 +1,0 @@
-# max_width <unsigned integer> Default: 100
-# Maximum width of each line
-max_width = 79
