@@ -18,10 +18,10 @@ use lazy_static::lazy_static;
 struct Opt {
     #[structopt(parse(from_os_str))]
     elf_binary: PathBuf,
-    #[structopt(long = "print_steps")]
+    #[structopt(long = "print-steps")]
     /// Prints clocks and instruction infomations when the instruction is write-backed
     print_steps: bool,
-    #[structopt(long = "print_debug_info")]
+    #[structopt(long = "print-debug-info")]
     /// Prints informations for debugging
     print_debug_info: bool,
 }
