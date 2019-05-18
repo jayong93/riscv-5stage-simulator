@@ -40,7 +40,7 @@ pub fn alu(func: &Function, input1: i32, input2: i32) -> i32 {
         Bge => (input1 >= input2) as i32,
         Bgeu => ((input1 as u32) >= (input2 as u32)) as i32,
         Lb | Lbu | Lh | Lhu | Lw | Sb | Sh | Sw => input1 + input2,
-        Mul => (((input1 as i64) * (input1 as i64)) & 0xffffffff) as i32,
+        Mul => (((input1 as i64) * (input2 as i64)) & 0xffffffff) as i32,
         Mulh => ((((input1 as i64) * (input2 as i64)) as u64) >> 32) as i32,
         Mulhu | Mulhsu => (((input1 as u64) * (input2 as u64)) >> 32) as i32,
         Div => input1 / input2,

@@ -66,6 +66,21 @@ pub struct Fields {
     pub imm: Option<u32>,
 }
 
+impl std::fmt::Display for Fields {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[ ")?;
+        if let Some(rs1) = self.rs1 { write!(f, "rs1: {}, ", rs1)?; }
+        if let Some(rs2) = self.rs2 { write!(f, "rs2: {}, ", rs2)?; }
+        if let Some(rs3) = self.rs3 { write!(f, "rs3: {}, ", rs3)?; }
+        if let Some(rd) = self.rd { write!(f, "rd: {}, ", rd)?; }
+        if let Some(funct2) = self.funct2 { write!(f, "funct2: {:x}, ", funct2)?; }
+        if let Some(funct3) = self.funct3 { write!(f, "funct3: {:x}, ", funct3)?; }
+        if let Some(funct7) = self.funct7 { write!(f, "funct7: {:x}, ", funct7)?; }
+        if let Some(imm) = self.imm { write!(f, "imm: {:x}, ", imm)?; }
+        write!(f, "]")
+    }
+}
+
 impl Fields {
     pub fn new(inst: u32, format: Format, opcode: Opcode) -> Self {
         use consts::*;

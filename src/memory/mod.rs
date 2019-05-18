@@ -235,6 +235,8 @@ impl ProcessMemory {
         // if addr <= 0x5b10 && 0x5b10 < addr + (data_size * value.len()) as u32 {
         //     return Err(format!("DEBUG: write to 0x5b10 in {:x}, with value: {:?}. previous value: {:?}", addr, byte_slice, data));
         // }
+        eprintln!("DEBUG: Store has occured in {:x}.", addr);
+        eprintln!("DEBUG: val: {:?}", byte_slice);
 
         data.copy_from_slice(byte_slice);
 
