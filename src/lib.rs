@@ -2,14 +2,11 @@
 
 
 pub mod alu;
-pub mod ca_simulator;
 pub mod consts;
-pub mod hazards;
 pub mod instruction;
 pub mod memory;
 pub mod pipeline;
 pub mod register;
-pub mod stages;
 
 extern crate goblin;
 extern crate byteorder;
