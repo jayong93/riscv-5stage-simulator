@@ -1,6 +1,7 @@
 //! Pipeline definition.
 
 pub mod branch_predictor;
+pub mod functional_units;
 pub mod load_buffer;
 pub mod operand;
 pub mod reorder_buffer;
@@ -25,6 +26,7 @@ pub struct Pipeline {
     pub rob: reorder_buffer::ReorderBuffer,
     pub rs: reservation_staion::ReservationStation,
     pub lb: load_buffer::LoadBuffer,
+    pub func_units: functional_units::FunctionalUnits,
 }
 
 impl Pipeline {
@@ -35,6 +37,7 @@ impl Pipeline {
             rob: Default::default(),
             rs: Default::default(),
             lb: Default::default(),
+            func_units: Default::default(),
         }
     }
 
@@ -184,7 +187,7 @@ impl Pipeline {
         {
             // branch의 결과값은 meta에 쓴다.
             rob_entry.meta = MetaData::Branch {
-                is_taken: if entry.value == 0 {false} else {true},
+                is_taken: if entry.value == 0 { false } else { true },
                 pred_taken: pred,
             };
         } else if !rob_entry.is_ready {
@@ -196,7 +199,11 @@ impl Pipeline {
     }
 
     pub fn process_lb_entry(&mut self, entry: self::load_buffer::LoadBufferEntry) {
-        unimplemented!()
+        let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
+        self.lb.propagate(entry.rob_index, entry.value);
+        self.rs.propagate(entry.rob_index, entry.value);
+        rob_entry.value = entry.value;
+        rob_entry.is_ready = true;
     }
 
     pub fn write_result(&mut self) {
@@ -211,9 +218,8 @@ impl Pipeline {
     }
 
     pub fn execute(&mut self) {
-        // jalr의 실행이 완료되면 pc를 변경
-        self.rs.execute();
-        self.lb.execute(&self.rob);
+        self.rs.execute(&self.rob, &mut self.func_units);
+        self.lb.execute(&self.rob, &mut self.func_units);
     }
 
     pub fn issue(&mut self) {

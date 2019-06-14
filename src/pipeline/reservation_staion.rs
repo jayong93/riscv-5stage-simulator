@@ -1,17 +1,18 @@
 use super::operand::Operand;
 use super::reorder_buffer::{MetaData, ReorderBuffer};
+use super::functional_units::FunctionalUnits;
 use instruction::Instruction;
 use register::RegisterFile;
 use std::collections::{LinkedList, VecDeque};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RSStatus {
     Wait,
     Execute,
     Finished,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RSEntry {
     pub rob_index: usize,
     status: RSStatus,
@@ -71,7 +72,65 @@ impl ReservationStation {
     }
 
     pub fn pop_finished(&mut self) -> Vec<RSEntry> {
-        
-        unimplemented!()
+        let finished_num = self
+            .station
+            .iter()
+            .filter(|entry| {
+                if let RSStatus::Finished = entry.status {
+                    true
+                } else {
+                    false
+                }
+            })
+            .count();
+
+        let mut finished = Vec::new();
+        for _ in 0..finished_num {
+            finished.push(self.station.pop_front().unwrap());
+        }
+        finished
+    }
+
+    pub fn propagate(&mut self, rob_index: usize, value: u32) {
+        for entry in self.station.iter_mut() {
+            let (op1, op2) = entry.operand;
+            if let Operand::Rob(index) = op1 {
+                if index == rob_index {
+                    entry.operand.0 = Operand::Value(value);
+                }
+            }
+            if let Operand::Rob(index) = op2 {
+                if index == rob_index {
+                    entry.operand.1 = Operand::Value(value);
+                }
+            }
+        }
+    }
+
+    pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits) {
+        for entry in self.station.iter_mut() {
+            match entry.status {
+                RSStatus::Wait => {
+                    match entry.operand {
+                        (Operand::Value(_), Operand::Value(_)) => {
+                            if let Some(result) = func_units.execute_general(&entry) {
+                                entry.status = RSStatus::Finished;
+                                entry.value = result;
+                            } else {
+                                entry.status = RSStatus::Execute;
+                            }
+                        }
+                        _ => {},
+                    }
+                },
+                RSStatus::Execute => {
+                    if let Some(result) = func_units.execute_general(&entry) {
+                        entry.status = RSStatus::Finished;
+                        entry.value = result;
+                    }
+                },
+                _ => {}
+            }
+        }
     }
 }
