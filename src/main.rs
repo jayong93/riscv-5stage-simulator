@@ -46,24 +46,24 @@ fn main() {
 
     let mut clock_it = 1..;
     loop {
-        let clock = clock_it.next().unwrap();
-        let last_reg = pipeline.run_clock();
-        if OPTS.print_steps && last_reg.inst.value != consts::NOP {
-            eprint!(
-                "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
-                clock,
-                last_reg.pc,
-                last_reg.inst.value,
-                last_reg.inst.function,
-                last_reg.inst.fields,
-            );
-            if OPTS.print_debug_info {
-                eprint!(" | regs: {}", pipeline.reg)
-            }
-            eprintln!("");
-        }
-        if pipeline.is_finished {
-            break;
-        }
+        //let clock = clock_it.next().unwrap();
+        //let last_reg = pipeline.run_clock();
+        //if OPTS.print_steps && last_reg.inst.value != consts::NOP {
+            //eprint!(
+                //"Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
+                //clock,
+                //last_reg.pc,
+                //last_reg.inst.value,
+                //last_reg.inst.function,
+                //last_reg.inst.fields,
+            //);
+            //if OPTS.print_debug_info {
+                //eprint!(" | regs: {}", pipeline.reg)
+            //}
+            //eprintln!("");
+        //}
+        //if pipeline.is_finished {
+            //break;
+        //}
     }
 }

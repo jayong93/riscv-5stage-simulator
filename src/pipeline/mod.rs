@@ -42,15 +42,15 @@ impl Pipeline {
         self.lb.clear();
     }
 
-    fn system_call(&mut self, call_type: u32) -> Result<(), SyscallError> {
-        let result: Result<u32, SyscallError> = match call_type {
+    fn system_call(&mut self) -> Result<(), SyscallError> {
+        let result: Result<u32, SyscallError> = match self.reg.gpr[consts::SYSCALL_NUM_REG].read() {
             64 => {
                 let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read() as i32;
                 let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let count = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
                 let bytes = self.memory.read_bytes(buf_addr, count as usize);
 
-                nix::unistd::write(fd, bytes).map_err(|err| SyscallError::Error(format!("{}", err)))
+                nix::unistd::write(fd, bytes).map(|n| n as u32).map_err(|err| SyscallError::Error(format!("{}", err)))
             }
             78 => {
                 let buf_addr = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
@@ -63,7 +63,7 @@ impl Pipeline {
                     .to_str()
                     .expect("Can't convert bytes to str");
                 let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
-                nix::fcntl::readlinkat(fd as i32, path_str, buf).map(|s| s.len()).map_err(|_| SyscallError::Error("Can't call readlinkat system call".to_string()))
+                nix::fcntl::readlinkat(fd as i32, path_str, buf).map(|s| s.len() as u32).map_err(|_| SyscallError::Error("Can't call readlinkat system call".to_string()))
             }
             80 => {
                 let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
@@ -101,7 +101,7 @@ impl Pipeline {
         use self::reorder_buffer::MetaData::*;
         let retired_entries = self.rob.retire();
 
-        for entry in retired_entries {
+        for entry in retired_entries.iter() {
             match entry.meta {
                 Branch(false) => {
                     self.clear_all_buffers();
@@ -113,15 +113,15 @@ impl Pipeline {
                 Normal(reg) => {
                     self.reg.gpr[reg as usize].write(entry.value);
                 },
-                Syscall(call_type) => {
-                    self.system_call(call_type).unwrap_or_else(|e| {
+                Syscall => {
+                    self.system_call().unwrap_or_else(|e| {
                             if let SyscallError::Error(s) = e {
                                 panic!("{}, in {}, registers: {}", s, entry.pc, self.reg)
                             }
                             else {
                                 panic!(
                                     "(in {})system call #{} is not implemented yet",
-                                    entry.pc, call_type
+                                    entry.pc, self.reg.gpr[consts::SYSCALL_NUM_REG].read()
                                 )
                             }
                         });
@@ -133,9 +133,16 @@ impl Pipeline {
         retired_entries
     }
 
-    fn is_program_finished(retired_entries: &[ReorderBufferEntry]) -> bool {
+    fn is_program_finished(&self, retired_entries: &[ReorderBufferEntry]) -> bool {
         use self::reorder_buffer::MetaData::*;
-        retired_entries.into_iter().any(|rob_entry| if let Syscall(93) | Syscall(94) = rob_entry.meta {true} else {false})
+        retired_entries.into_iter().any(|rob_entry| {
+            if let Syscall = rob_entry.meta {
+                if let 93 | 94 = self.reg.gpr[consts::SYSCALL_NUM_REG].read() {
+                    return true;
+                }
+            }
+            false
+        })
     }
 
     pub fn write_result(&mut self) {
@@ -149,12 +156,27 @@ impl Pipeline {
     }
 
     pub fn issue(&mut self) {
-        unimplemented!()
+        let mut pc = self.reg.pc.read();
+        let insts : Vec<_> = (0..2).map(|_| {
+            let raw_inst = self.memory.read_inst(pc);
+            let retval = (pc, Instruction::new(raw_inst));
+            pc += consts::WORD_SIZE as u32;
+            retval
+        }).collect();
+        self.reg.pc.write(pc);
+
+        for (pc, inst) in insts {
+            let rob_index = self.rob.issue(pc, inst);
+            self.rs.issue(rob_index, &self.rob);
+            if inst.opcode == instruction::Opcode::Load {
+                self.lb.issue(rob_index, &self.rob); 
+            }
+        }
     }
     // return true when process ends.
     pub fn run_clock(&mut self) -> Vec<ReorderBufferEntry> {
         let retired_insts = self.commit();
-        if Self::is_program_finished(&retired_insts) {
+        if self.is_program_finished(&retired_insts) {
             return retired_insts;
         }
 
