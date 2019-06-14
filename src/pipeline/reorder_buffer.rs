@@ -45,6 +45,23 @@ impl ReorderBufferEntry {
     }
 }
 
+pub struct Iter<'a> {
+    rob: &'a Vec<ReorderBufferEntry>,
+    cur_head: usize,
+    cur_tail: usize,
+}
+
+impl Iterator for Iter<'a> {
+    type Item = &'a ReorderBufferEntry;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_head +
+        let old_head = self.cur_head;
+        self.cur_head = (self.cur_head + 1) % self.rob.len();
+        self.rob.get(old_head)
+    }
+}
+
 #[derive(Debug)]
 pub struct ReorderBuffer {
     buf: Vec<ReorderBufferEntry>,

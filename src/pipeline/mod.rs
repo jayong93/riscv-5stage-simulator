@@ -167,9 +167,10 @@ impl Pipeline {
 
         for (pc, inst) in insts {
             let rob_index = self.rob.issue(pc, inst);
-            self.rs.issue(rob_index, &self.rob);
             if inst.opcode == instruction::Opcode::Load {
                 self.lb.issue(rob_index, &self.rob); 
+            } else {
+                self.rs.issue(rob_index, &self.rob);
             }
         }
     }
