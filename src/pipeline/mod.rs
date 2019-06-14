@@ -1,15 +1,16 @@
 //! Pipeline definition.
 
+pub mod branch_predictor;
 pub mod load_buffer;
+pub mod operand;
 pub mod reorder_buffer;
 pub mod reservation_staion;
-pub mod branch_predictor;
 
+use self::reorder_buffer::ReorderBufferEntry;
 use consts;
-use instruction::Instruction;
+use instruction::{Function, Instruction, Opcode};
 use memory;
 use register;
-use self::reorder_buffer::ReorderBufferEntry;
 
 enum SyscallError {
     NotImpl,
@@ -40,6 +41,7 @@ impl Pipeline {
     fn clear_all_buffers(&mut self) {
         self.rs.clear();
         self.lb.clear();
+        self.rob.clear();
     }
 
     fn system_call(&mut self) -> Result<(), SyscallError> {
@@ -50,7 +52,9 @@ impl Pipeline {
                 let count = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
                 let bytes = self.memory.read_bytes(buf_addr, count as usize);
 
-                nix::unistd::write(fd, bytes).map(|n| n as u32).map_err(|err| SyscallError::Error(format!("{}", err)))
+                nix::unistd::write(fd, bytes)
+                    .map(|n| n as u32)
+                    .map_err(|err| SyscallError::Error(format!("{}", err)))
             }
             78 => {
                 let buf_addr = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
@@ -63,19 +67,28 @@ impl Pipeline {
                     .to_str()
                     .expect("Can't convert bytes to str");
                 let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
-                nix::fcntl::readlinkat(fd as i32, path_str, buf).map(|s| s.len() as u32).map_err(|_| SyscallError::Error("Can't call readlinkat system call".to_string()))
+                nix::fcntl::readlinkat(fd as i32, path_str, buf)
+                    .map(|s| s.len() as u32)
+                    .map_err(|_| {
+                        SyscallError::Error("Can't call readlinkat system call".to_string())
+                    })
             }
             80 => {
                 let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
                 let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let stat = nix::sys::stat::fstat(fd as i32).unwrap();
 
-                self.memory.write(buf_addr, stat).map(|_| 0).map_err(|s| SyscallError::Error(s))
+                self.memory
+                    .write(buf_addr, stat)
+                    .map(|_| 0)
+                    .map_err(|s| SyscallError::Error(s))
             }
             160 => {
                 let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
                 self.memory
-                    .write(addr, nix::sys::utsname::uname()).map(|_| 0).map_err(|s| SyscallError::Error(s))
+                    .write(addr, nix::sys::utsname::uname())
+                    .map(|_| 0)
+                    .map_err(|s| SyscallError::Error(s))
             }
             174 => Ok(nix::unistd::getuid().as_raw()),
             175 => Ok(nix::unistd::geteuid().as_raw()),
@@ -91,10 +104,13 @@ impl Pipeline {
                     self.memory.v_address_range.1 = addr + 1;
                 }
                 Ok(addr)
-            },
+            }
             _ => Err(SyscallError::NotImpl),
         };
-        result.map(|ret_val| {self.reg.gpr[consts::SYSCALL_RET_REG].write(ret_val); ()})
+        result.map(|ret_val| {
+            self.reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
+            ()
+        })
     }
 
     pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
@@ -103,29 +119,40 @@ impl Pipeline {
 
         for entry in retired_entries.iter() {
             match entry.meta {
-                Branch(false) => {
-                    self.clear_all_buffers();
-                    self.reg.pc.write(entry.value);
-                },
+                Branch {
+                    pred_taken: pred,
+                    is_taken: real,
+                } => {
+                    if pred != real {
+                        self.clear_all_buffers();
+                        if real {
+                            self.reg.pc.write(entry.value);
+                        } else {
+                            self.reg
+                                .pc
+                                .write(entry.pc + crate::consts::WORD_SIZE as u32);
+                        }
+                    }
+                }
                 Store(addr) => {
-                    self.memory.write(addr, entry.value);
-                },
+                    self.memory.write(addr, entry.value).unwrap();
+                }
                 Normal(reg) => {
                     self.reg.gpr[reg as usize].write(entry.value);
-                },
+                }
                 Syscall => {
                     self.system_call().unwrap_or_else(|e| {
-                            if let SyscallError::Error(s) = e {
-                                panic!("{}, in {}, registers: {}", s, entry.pc, self.reg)
-                            }
-                            else {
-                                panic!(
-                                    "(in {})system call #{} is not implemented yet",
-                                    entry.pc, self.reg.gpr[consts::SYSCALL_NUM_REG].read()
-                                )
-                            }
-                        });
-                },
+                        if let SyscallError::Error(s) = e {
+                            panic!("{}, in {}, registers: {}", s, entry.pc, self.reg)
+                        } else {
+                            panic!(
+                                "(in {})system call #{} is not implemented yet",
+                                entry.pc,
+                                self.reg.gpr[consts::SYSCALL_NUM_REG].read()
+                            )
+                        }
+                    });
+                }
                 _ => {}
             }
         }
@@ -145,32 +172,91 @@ impl Pipeline {
         })
     }
 
-    pub fn write_result(&mut self) {
+    pub fn process_rs_entry(&mut self, entry: self::reservation_staion::RSEntry) {
+        use self::reorder_buffer::MetaData;
+        let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
+        if entry.inst.function == Function::Jalr {
+            self.reg.pc.write(entry.value);
+        } else if let MetaData::Branch {
+            pred_taken: pred,
+            is_taken: _,
+        } = rob_entry.meta
+        {
+            // branch의 결과값은 meta에 쓴다.
+            rob_entry.meta = MetaData::Branch {
+                is_taken: if entry.value == 0 {false} else {true},
+                pred_taken: pred,
+            };
+        } else if !rob_entry.is_ready {
+            self.lb.propagate(entry.rob_index, entry.value);
+            self.rs.propagate(entry.rob_index, entry.value);
+            rob_entry.value = entry.value;
+        }
+        rob_entry.is_ready = true;
+    }
+
+    pub fn process_lb_entry(&mut self, entry: self::load_buffer::LoadBufferEntry) {
         unimplemented!()
+    }
+
+    pub fn write_result(&mut self) {
+        let finished_rs_entries = self.rs.pop_finished();
+        let finished_lb_entries = self.lb.pop_finished();
+        for entry in finished_rs_entries {
+            self.process_rs_entry(entry);
+        }
+        for entry in finished_lb_entries {
+            self.process_lb_entry(entry);
+        }
     }
 
     pub fn execute(&mut self) {
-        // system call이 ROB에 자신보다 앞에 있으면 무조건 대기.
-        // branch의 rob value 값은 실패시의 주소
-        unimplemented!()
+        // jalr의 실행이 완료되면 pc를 변경
+        self.rs.execute();
+        self.lb.execute(&self.rob);
     }
 
     pub fn issue(&mut self) {
+        // if a last instruction in ROB is either Jalr or Ecall,
+        // stop fetching until the instruction is ready to commit.
+        let has_to_stall = self
+            .rob
+            .iter()
+            .rev()
+            .next()
+            .and_then(|entry| match entry.inst.function {
+                Function::Jalr if !entry.is_ready => Some(()),
+                Function::Ecall => Some(()),
+                _ => None,
+            })
+            .is_some();
+        if has_to_stall {
+            return;
+        }
+
         let mut pc = self.reg.pc.read();
-        let insts : Vec<_> = (0..2).map(|_| {
-            let raw_inst = self.memory.read_inst(pc);
-            let retval = (pc, Instruction::new(raw_inst));
-            pc += consts::WORD_SIZE as u32;
-            retval
-        }).collect();
+        let insts: Vec<_> = (0..2)
+            .map(|_| {
+                let raw_inst = self.memory.read_inst(pc);
+                let retval = (pc, Instruction::new(raw_inst));
+                pc += consts::WORD_SIZE as u32;
+                retval
+            })
+            .collect();
         self.reg.pc.write(pc);
 
         for (pc, inst) in insts {
-            let rob_index = self.rob.issue(pc, inst);
-            if inst.opcode == instruction::Opcode::Load {
-                self.lb.issue(rob_index, &self.rob); 
+            let rob_index = self.rob.issue(pc, inst.clone());
+            if inst.opcode == crate::instruction::Opcode::Load {
+                self.lb.issue(rob_index, &self.rob, &self.reg);
             } else {
-                self.rs.issue(rob_index, &self.rob);
+                self.rs.issue(rob_index, &self.rob, &self.reg);
+            }
+
+            // if jal instruction has issued, stop fetching and change pc
+            if let Opcode::Jal = inst.opcode {
+                self.reg.pc.write(pc + inst.fields.imm.unwrap());
+                break;
             }
         }
     }

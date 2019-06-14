@@ -1,9 +1,8 @@
-use std::collections::VecDeque;
 use instruction::Instruction;
 
 #[derive(Debug, Clone)]
 pub enum MetaData {
-    Branch(bool),
+    Branch { pred_taken: bool, is_taken: bool },
     Store(u32),
     Syscall,
     Normal(u8),
@@ -21,25 +20,43 @@ pub struct ReorderBufferEntry {
     pub inst: Instruction,
     pub meta: MetaData,
     pub value: u32,
-    is_ready: bool,
+    pub is_ready: bool,
 }
 
 impl ReorderBufferEntry {
     pub fn new(pc: u32, inst: Instruction) -> Self {
-        use instruction::Opcode::*;
         use instruction::Function;
-        
+        use instruction::Opcode::*;
+
         let (meta, is_ready) = match inst.opcode {
-            Branch => (MetaData::Branch(false), false),
+            Branch => (
+                MetaData::Branch {
+                    pred_taken: false,
+                    is_taken: false,
+                },
+                false,
+            ),
             Store => (MetaData::Store(0), false),
             System if inst.function == Function::Ecall => (MetaData::Syscall, true),
-            _ => (MetaData::Normal(inst.fields.rd.unwrap_or(0)), false),
+            _ => (
+                MetaData::Normal(inst.fields.rd.unwrap_or(0)),
+                if let Function::Jal = inst.function {
+                    true
+                } else {
+                    false
+                },
+            ),
+        };
+        let value = match inst.opcode {
+            Jal | Jalr => pc + crate::consts::WORD_SIZE as u32,
+            Branch => pc + inst.fields.imm.unwrap(),
+            _ => 0,
         };
         ReorderBufferEntry {
             pc,
             inst,
-            meta, 
-            value: 0,
+            meta,
+            value,
             is_ready,
         }
     }
@@ -47,18 +64,46 @@ impl ReorderBufferEntry {
 
 pub struct Iter<'a> {
     rob: &'a Vec<ReorderBufferEntry>,
-    cur_head: usize,
-    cur_tail: usize,
+    head: usize,
+    tail: usize,
 }
 
-impl Iterator for Iter<'a> {
+impl<'a> Iterator for Iter<'a> {
     type Item = &'a ReorderBufferEntry;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_head +
-        let old_head = self.cur_head;
-        self.cur_head = (self.cur_head + 1) % self.rob.len();
+        if self.head == self.tail {
+            return None;
+        }
+        let old_head = self.head;
+        self.head = (self.head + 1) % self.rob.len();
         self.rob.get(old_head)
+    }
+}
+
+impl<'a> ExactSizeIterator for Iter<'a> {
+    fn len(&self) -> usize {
+        let tail = if self.tail < self.head {
+            self.tail + self.rob.len()
+        } else {
+            self.tail
+        };
+        tail - self.head
+    }
+}
+
+impl<'a> DoubleEndedIterator for Iter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.head == self.tail {
+            return None;
+        }
+        let old_tail = self.tail;
+        self.tail = if self.tail == 0 {
+            self.rob.len() - 1
+        } else {
+            self.tail - 1
+        };
+        self.rob.get(old_tail)
     }
 }
 
@@ -71,7 +116,7 @@ pub struct ReorderBuffer {
 
 impl Default for ReorderBuffer {
     fn default() -> Self {
-        ReorderBuffer{
+        ReorderBuffer {
             buf: vec![ReorderBufferEntry::default()],
             head: 0,
             tail: 0,
@@ -80,23 +125,30 @@ impl Default for ReorderBuffer {
 }
 
 impl ReorderBuffer {
+    pub fn clear(&mut self) {
+        self.head = 0;
+        self.tail = 0;
+    }
+
     pub fn retire(&mut self) -> Vec<ReorderBufferEntry> {
-        unimplemented!()
+        let retired_entries: Vec<_> = self.iter().filter(|entry| entry.is_ready).cloned().collect();
+        self.head = (self.head + retired_entries.len()) % self.buf.len();
+        retired_entries
     }
 
     pub fn issue(&mut self, pc: u32, inst: Instruction) -> usize {
-        let real_len = self.buf.len()-1;
+        let real_len = self.buf.len() - 1;
         if real_len <= self.len() {
             if real_len == 0 {
                 self.buf.resize_with(2, Default::default);
             } else {
-                self.buf.resize_with(real_len * 2 +1, Default::default);
+                self.buf.resize_with(real_len * 2 + 1, Default::default);
             }
         }
 
         self.buf[self.tail] = ReorderBufferEntry::new(pc, inst);
         let rob_index = self.tail;
-        self.tail = (self.tail+1) % self.buf.len();
+        self.tail = (self.tail + 1) % self.buf.len();
         rob_index
     }
 
@@ -109,7 +161,7 @@ impl ReorderBuffer {
         tail - self.head
     }
 
-    pub fn relative_pos(&self, index: usize) -> Option<usize> {
+    pub fn to_relative_pos(&self, index: usize) -> Option<usize> {
         self.get(index).and_then(|_| {
             if self.head <= index {
                 Some(index - self.head)
@@ -119,6 +171,14 @@ impl ReorderBuffer {
                 None
             }
         })
+    }
+
+    pub fn to_index(&self, relative_pos: usize) -> Option<usize> {
+        if self.head + relative_pos >= self.buf.len() * 2 {
+            None
+        } else {
+            Some((self.head + relative_pos) % self.buf.len())
+        }
     }
 
     pub fn get(&self, index: usize) -> Option<&ReorderBufferEntry> {
@@ -137,7 +197,11 @@ impl ReorderBuffer {
         }
     }
 
-    pub fn iter(&self) -> impl std::iter::Iterator<Item=&ReorderBufferEntry> {
-        self.buf.iter().cycle().skip(self.head).take(self.len())
+    pub fn iter(&self) -> Iter {
+        Iter {
+            rob: &self.buf,
+            tail: self.tail,
+            head: self.head,
+        }
     }
 }
