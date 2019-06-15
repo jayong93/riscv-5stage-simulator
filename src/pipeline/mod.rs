@@ -118,6 +118,7 @@ impl Pipeline {
 
     pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
         use self::reorder_buffer::MetaData::*;
+        use self::operand::Operand;
         let retired_entries = self.rob.retire(&mut self.func_units);
 
         for entry in retired_entries.iter() {
@@ -137,7 +138,7 @@ impl Pipeline {
                         }
                     }
                 }
-                Store(addr) => {
+                Store(Operand::Value(addr)) => {
                     self.memory.write(addr, entry.value).unwrap();
                 }
                 Normal(reg) => {
@@ -193,7 +194,8 @@ impl Pipeline {
         } else if !rob_entry.is_ready {
             self.lb.propagate(entry.rob_index, entry.value);
             self.rs.propagate(entry.rob_index, entry.value);
-            rob_entry.value = entry.value;
+            self.rob.propagate(entry.rob_index, entry.value);
+            rob_entry.value = Some(entry.value);
         }
         rob_entry.is_ready = true;
     }
@@ -202,7 +204,8 @@ impl Pipeline {
         let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
         self.lb.propagate(entry.rob_index, entry.value);
         self.rs.propagate(entry.rob_index, entry.value);
-        rob_entry.value = entry.value;
+        self.rob.propagate(entry.rob_index, entry.value);
+        rob_entry.value = Some(entry.value);
         rob_entry.is_ready = true;
     }
 

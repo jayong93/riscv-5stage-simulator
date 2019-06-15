@@ -1,10 +1,11 @@
 use super::functional_units::FunctionalUnits;
-use instruction::Instruction;
+use instruction::{Opcode, Instruction};
+use super::operand::Operand;
 
 #[derive(Debug, Clone)]
 pub enum MetaData {
     Branch { pred_taken: bool, is_taken: bool },
-    Store(u32), // TODO: Store가 write_result에서 register값 받도록 변경
+    Store(Operand, Operand), // TODO: Store가 write_result에서 register값 받도록 변경
     Syscall,
     Normal(u8),
 }
@@ -38,7 +39,7 @@ impl ReorderBufferEntry {
                 },
                 false,
             ),
-            Store => (MetaData::Store(0), false),
+            Store => (MetaData::Store(Operand::Value(0), Operand::Value(0)), false),
             System if inst.function == Function::Ecall => (MetaData::Syscall, true),
             _ => (
                 MetaData::Normal(inst.fields.rd.unwrap_or(0)),
@@ -61,6 +62,10 @@ impl ReorderBufferEntry {
             value,
             is_ready,
         }
+    }
+
+    fn is_ready_to_retire(&self) -> bool {
+        unimplemented!()
     }
 }
 
@@ -132,20 +137,10 @@ impl ReorderBuffer {
         self.tail = 0;
     }
 
-    pub fn retire(&mut self, func_unit: &mut FunctionalUnits) -> Vec<ReorderBufferEntry> {
+    pub fn retire(&mut self) -> Vec<ReorderBufferEntry> {
         let retired_entries: Vec<_> = self
             .iter()
-            .enumerate()
-            .take_while(|(rel_pos, entry)| {
-                let index = self.to_index(*rel_pos).unwrap();
-                entry.is_ready
-                    && if let Some(()) = func_unit.execute_store(index, self) {
-                        true
-                    } else {
-                        false
-                    }
-            })
-            .map(|(_, entry)| entry)
+            .take_while(|entry| entry.is_read_to_retire())
             .cloned()
             .collect();
         self.head = (self.head + retired_entries.len()) % self.buf.len();
@@ -162,7 +157,17 @@ impl ReorderBuffer {
             }
         }
 
-        self.buf[self.tail] = ReorderBufferEntry::new(pc, inst);
+        let mut new_entry = ReorderBufferEntry::new(pc, inst);
+        if inst.opcode == Opcode::Store {
+            let (reg1, reg2) = (inst.fields.rs1.unwrap() as usize, inst.fields.rs2.unwrap() as usize);
+            self.iter().enumerate().rev().map(|(rel_pos, entry)| (self.to_index(rel_pos).unwrap(), entry)).find_map(|(idx, entry)| {
+                match entry.meta {
+                    MetaData::Normal(target_reg) => if target_reg as usize == reg {Some(idx)} else {None},
+                    _ => None 
+                }
+            }).map(|idx| new_entry.meta = MetaData::Store(Operand::Rob(idx)));
+        }
+        self.buf[self.tail] = new_entry;
         let rob_index = self.tail;
         self.tail = (self.tail + 1) % self.buf.len();
         rob_index
@@ -219,5 +224,36 @@ impl ReorderBuffer {
             tail: self.tail,
             head: self.head,
         }
+    }
+
+    pub fn propagate(&mut self, rob_idx: usize, value: u32) {
+        for idx in self.iter().enumerate().map(|(i,_)| self.to_index(i).unwrap()) {
+            let entry = self.get_mut(idx).unwrap();
+            match entry.meta {
+                MetaData::Store(op1, op2) => {
+                    let new_op1;
+                    if let Operand::Rob(base_idx) = op1 {
+                        if base_idx == rob_idx {
+                            new_op1 = Operand::Value(entry.inst.fields.imm.unwrap()+value);
+                        } else {
+                            new_op1 = op1;
+                        }
+                    }
+                    let new_op2;
+                    if let Operand::Rob(src_idx) = op2 {
+                        if src_idx == rob_idx {
+                            new_op2 = Operand::Value(entry.inst.fields.imm.unwrap()+value);
+                        } else {
+                            new_op2 = op2;
+                        }
+                    }
+                    if let (Operand::Value(_), Operand::Value(_)) = (new_op1, new_op2) {
+                        entry.is_ready = true;
+                    }
+                    entry.meta = MetaData::Store(new_op1, new_op2);
+                }
+                _ => {}
+            }
+        } 
     }
 }

@@ -105,12 +105,17 @@ impl LoadBuffer {
             if let Operand::Value(_) = entry.base {
                 let entry_rel_pos = rob.to_relative_pos(entry.rob_index).unwrap();
                 if rob.iter().take(entry_rel_pos).any(|rob_entry| {
-                    if let MetaData::Store(store_addr) = rob_entry.meta {
-                        if store_addr == entry.addr {
-                            return true;
-                        }
+                    match rob_entry.meta {
+                        MetaData::Store(Operand::Rob(_)) => true,
+                        MetaData::Store(Operand::Value(addr)) => {
+                            if addr == entry.addr {
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                        _ => false
                     }
-                    false
                 }) {
                     continue;
                 }

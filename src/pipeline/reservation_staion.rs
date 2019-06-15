@@ -51,19 +51,25 @@ impl ReservationStation {
         let rob_entry = rob.get(rob_index).unwrap();
         let inst = rob_entry.inst.clone();
         let operands = [
-            inst.fields.rs1.unwrap_or(0) as usize,
-            inst.fields.rs2.unwrap_or(0) as usize,
+            inst.fields.rs1,
+            inst.fields.rs2,
         ];
         let mut operands: VecDeque<_> = operands
             .into_iter()
-            .map(|rs| {
-                let val = reg.gpr[*rs].read();
+            .enumerate()
+            .map(|(i, rs)| {
+                if i == 1 && rs.is_none() {
+                    return Operand::Value(inst.fields.imm.unwrap());
+                }
+
+                let rs = rs.unwrap_or(0) as usize;
+                let val = reg.gpr[rs].read();
                 rob.iter()
                     .enumerate()
                     .rev()
                     .find_map(|(rel_pos, entry)| {
                         if let MetaData::Normal(reg) = entry.meta {
-                            if reg as usize == *rs {
+                            if reg as usize == rs {
                                 return rob.to_index(rel_pos);
                             }
                         }
