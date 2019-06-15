@@ -3,7 +3,7 @@ use super::reorder_buffer::{MetaData, ReorderBuffer};
 use super::functional_units::FunctionalUnits;
 use instruction::Instruction;
 use register::RegisterFile;
-use std::collections::{LinkedList, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
 pub enum RSStatus {
@@ -39,7 +39,7 @@ impl RSEntry {
 
 #[derive(Debug, Default)]
 pub struct ReservationStation {
-    station: LinkedList<RSEntry>,
+    station: HashMap<usize, RSEntry>,
 }
 
 impl ReservationStation {
@@ -84,31 +84,32 @@ impl ReservationStation {
             operand: (operands.pop_front().unwrap(), operands.pop_front().unwrap()),
             value: 0,
         };
-        self.station.push_back(new_entry);
+        self.station.insert(rob_index, new_entry);
     }
 
     pub fn pop_finished(&mut self) -> Vec<RSEntry> {
-        let finished_num = self
+        let mut finished = Vec::new();
+        let finished_indices: Vec<_> = self
             .station
             .iter()
-            .filter(|entry| {
+            .filter(|(_, entry)| {
                 if let RSStatus::Finished = entry.status {
                     true
                 } else {
                     false
                 }
             })
-            .count();
+            .map(|(idx, _)| *idx)
+            .collect();
 
-        let mut finished = Vec::new();
-        for _ in 0..finished_num {
-            finished.push(self.station.pop_front().unwrap());
+        for idx in finished_indices {
+            finished.push(self.station.remove(&idx).unwrap());
         }
         finished
     }
 
     pub fn propagate(&mut self, rob_index: usize, value: u32) {
-        for entry in self.station.iter_mut() {
+        for entry in self.station.values_mut() {
             let (op1, op2) = entry.operand;
             if let Operand::Rob(index) = op1 {
                 if index == rob_index {
@@ -124,8 +125,7 @@ impl ReservationStation {
     }
 
     pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits) {
-        //TODO: 완료된 작업 제거
-        for entry in self.station.iter_mut() {
+        for entry in self.station.values_mut() {
             match entry.status {
                 RSStatus::Wait => {
                     match entry.operand {

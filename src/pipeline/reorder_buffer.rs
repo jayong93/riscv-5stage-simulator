@@ -26,6 +26,7 @@ pub struct ReorderBufferEntry {
 
 impl ReorderBufferEntry {
     pub fn new(pc: u32, inst: Instruction) -> Self {
+        // TODO: Amo 명령어 처리
         use instruction::Function;
         use instruction::Opcode::*;
 
@@ -134,14 +135,17 @@ impl ReorderBuffer {
     pub fn retire(&mut self, func_unit: &mut FunctionalUnits) -> Vec<ReorderBufferEntry> {
         let retired_entries: Vec<_> = self
             .iter()
-            .take_while(|entry| {
+            .enumerate()
+            .take_while(|(rel_pos, entry)| {
+                let index = self.to_index(*rel_pos).unwrap();
                 entry.is_ready
-                    && if let Some(()) = func_unit.execute_store(&entry) {
+                    && if let Some(()) = func_unit.execute_store(index, self) {
                         true
                     } else {
                         false
                     }
             })
+            .map(|(_, entry)| entry)
             .cloned()
             .collect();
         self.head = (self.head + retired_entries.len()) % self.buf.len();

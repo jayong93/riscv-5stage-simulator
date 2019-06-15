@@ -1,5 +1,5 @@
 use super::load_buffer::LoadBufferEntry;
-use super::reorder_buffer::ReorderBufferEntry;
+use super::reorder_buffer::ReorderBuffer;
 use super::reservation_staion::RSEntry;
 use instruction::{Function, Instruction, Opcode};
 
@@ -29,43 +29,73 @@ impl FunctionalUnits {
     }
 
     pub fn execute_general(&mut self, entry: &RSEntry) -> Option<u32> {
-        let unit_entry = self.buf.entry(entry.rob_index).or_insert_with(|| {
-            let (A, B) = entry.operand_values();
-            FunctionalUnitEntry {
-                remain_clock: Self::remain_clocks(&entry.inst),
-                func: entry.inst.function,
-                A: A.unwrap(),
-                B: B.unwrap(),
-            }
-        });
+        let result;
+        {
+            let unit_entry = self.buf.entry(entry.rob_index).or_insert_with(|| {
+                let (A, B) = entry.operand_values();
+                FunctionalUnitEntry {
+                    remain_clock: Self::remain_clocks(&entry.inst),
+                    func: entry.inst.function,
+                    A: A.unwrap(),
+                    B: B.unwrap(),
+                }
+            });
 
-        unit_entry.remain_clock -= 1;
-        if unit_entry.remain_clock <= 0 {
-            Some(crate::alu::alu(
-                &unit_entry.func,
-                unit_entry.A as i32,
-                unit_entry.B as i32,
-            ) as u32)
-        } else {
-            None
+            unit_entry.remain_clock -= 1;
+            result = if unit_entry.remain_clock <= 0 {
+                Some(
+                    crate::alu::alu(&unit_entry.func, unit_entry.A as i32, unit_entry.B as i32)
+                        as u32,
+                )
+            } else {
+                None
+            };
         }
+
+        if let Some(_) = result {
+            self.buf.remove(&entry.rob_index);
+        }
+        result
     }
 
-    pub fn execute_load(&mut self, entry: &LoadBufferEntry) -> Option<u32> {
-        let unit_entry = self.buf.entry(entry.rob_index).or_insert_with(|| {
-            let (A, B) = (entry.addr, entry.value);
-            FunctionalUnitEntry {
-                remain_clock: 10,
-                func: entry.func,
-                A: A,
-                B: B,
-            }
-        });
-        // rob에 같은 주소의 store가 있으면 skip
-        unimplemented!()
+    pub fn execute_load(
+        &mut self,
+        entry: &LoadBufferEntry,
+        mem: &crate::memory::ProcessMemory,
+    ) -> Option<u32> {
+        let result;
+        {
+            let unit_entry = self.buf.entry(entry.rob_index).or_insert_with(|| {
+                let (A, B) = (entry.addr, 0);
+                FunctionalUnitEntry {
+                    remain_clock: 10,
+                    func: entry.func,
+                    A: A,
+                    B: B,
+                }
+            });
+
+            unit_entry.remain_clock -= 1;
+            let addr = unit_entry.A;
+            result = if unit_entry.remain_clock <= 0 {
+                Some(match unit_entry.func {
+                    Function::Lb | Function::Lbu => mem.read::<u8>(addr) as u32,
+                    Function::Lh | Function::Lhu => mem.read::<u16>(addr) as u32,
+                    Function::Lw => mem.read::<u32>(addr),
+                    _ => unreachable!(),
+                })
+            } else {
+                None
+            };
+        }
+
+        if let Some(_) = result {
+            self.buf.remove(&entry.rob_index);
+        }
+        result
     }
 
-    pub fn execute_store(&mut self, entry: &ReorderBufferEntry) -> Option<()> {
+    pub fn execute_store(&mut self, rob_index: usize, entry: &ReorderBuffer) -> Option<()> {
         // TODO: Store가 아니면 무조건 성공
         // 같은 주소의 load가 실행중이면 None 반환
         unimplemented!()

@@ -219,7 +219,7 @@ impl Pipeline {
 
     pub fn execute(&mut self) {
         self.rs.execute(&self.rob, &mut self.func_units);
-        self.lb.execute(&self.rob, &mut self.func_units);
+        self.lb.execute(&self.rob, &mut self.func_units, &self.memory);
     }
 
     pub fn issue(&mut self) {
@@ -233,6 +233,7 @@ impl Pipeline {
             .and_then(|entry| match entry.inst.function {
                 Function::Jalr if !entry.is_ready => Some(()),
                 Function::Ecall => Some(()),
+                _ if entry.inst.opcode == Opcode::Amo => Some(()),
                 _ => None,
             })
             .is_some();

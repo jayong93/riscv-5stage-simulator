@@ -4,6 +4,7 @@ use super::reorder_buffer::{MetaData, ReorderBuffer};
 use register::RegisterFile;
 use std::collections::VecDeque;
 use instruction::Function;
+use memory::ProcessMemory;
 
 #[derive(Debug, Clone)]
 pub enum LoadBufferStatus {
@@ -93,7 +94,7 @@ impl LoadBuffer {
         }
     }
 
-    pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits) {
+    pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits, mem: &ProcessMemory) {
         for entry in self.buf.iter_mut().filter(|entry| {
             if let LoadBufferStatus::Finished = entry.status {
                 false
@@ -114,7 +115,7 @@ impl LoadBuffer {
                     continue;
                 }
 
-                if let Some(result) = func_units.execute_load(&entry) {
+                if let Some(result) = func_units.execute_load(&entry, mem) {
                     entry.status = LoadBufferStatus::Finished;
                     entry.value = result;
                 } else if let LoadBufferStatus::Wait = entry.status {
