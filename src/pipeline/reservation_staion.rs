@@ -70,12 +70,18 @@ impl ReservationStation {
                     .find_map(|(rel_pos, entry)| {
                         if let MetaData::Normal(reg) = entry.meta {
                             if reg as usize == rs {
-                                return rob.to_index(rel_pos);
+                                return rob.to_index(rel_pos).map(|idx| (idx, entry));
                             }
                         }
                         None
                     })
-                    .map_or(Operand::Value(val), |idx| Operand::Rob(idx))
+                    .map_or(Operand::Value(val), |(idx, entry)| {
+                        if entry.is_ready {
+                            Operand::Value(entry.value)
+                        } else {
+                            Operand::Rob(idx)
+                        }
+                    })
             })
             .collect();
 
@@ -90,6 +96,7 @@ impl ReservationStation {
             operand: (operands.pop_front().unwrap(), operands.pop_front().unwrap()),
             value: 0,
         };
+
         self.station.insert(rob_index, new_entry);
     }
 

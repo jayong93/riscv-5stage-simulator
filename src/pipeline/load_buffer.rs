@@ -1,10 +1,10 @@
 use super::functional_units::FunctionalUnits;
 use super::operand::Operand;
 use super::reorder_buffer::{MetaData, ReorderBuffer};
-use register::RegisterFile;
-use std::collections::VecDeque;
 use instruction::Function;
 use memory::ProcessMemory;
+use register::RegisterFile;
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 pub enum LoadBufferStatus {
@@ -44,20 +44,33 @@ impl LoadBuffer {
                 .find_map(|(rel_pos, entry)| {
                     if let MetaData::Normal(reg) = entry.meta {
                         if reg as usize == base_reg {
-                            return rob.to_index(rel_pos);
+                            return rob.to_index(rel_pos).map(|idx| (idx, entry));
                         }
                     }
                     None
                 })
-                .map_or(Operand::Value(val), |idx| Operand::Rob(idx))
+                .map_or(Operand::Value(val), |(idx, entry)| {
+                    if entry.is_ready {
+                        Operand::Value(entry.value)
+                    } else {
+                        Operand::Rob(idx)
+                    }
+                })
         };
+
+        let addr = inst.fields.imm.unwrap()
+            + if let Operand::Value(addr) = base {
+                addr
+            } else {
+                0
+            };
 
         let new_entry = LoadBufferEntry {
             rob_index,
             status: LoadBufferStatus::Wait,
             base,
             func: inst.function,
-            addr: inst.fields.imm.unwrap(),
+            addr,
             value: 0,
         };
         self.buf.push_back(new_entry);
@@ -94,7 +107,12 @@ impl LoadBuffer {
         }
     }
 
-    pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits, mem: &ProcessMemory) {
+    pub fn execute(
+        &mut self,
+        rob: &ReorderBuffer,
+        func_units: &mut FunctionalUnits,
+        mem: &ProcessMemory,
+    ) {
         for entry in self.buf.iter_mut().filter(|entry| {
             if let LoadBufferStatus::Finished = entry.status {
                 false
@@ -104,19 +122,21 @@ impl LoadBuffer {
         }) {
             if let Operand::Value(_) = entry.base {
                 let entry_rel_pos = rob.to_relative_pos(entry.rob_index).unwrap();
-                if rob.iter().take(entry_rel_pos).any(|rob_entry| {
-                    match rob_entry.meta {
-                        MetaData::Store(Operand::Rob(_)) => true,
-                        MetaData::Store(Operand::Value(addr)) => {
+                if rob
+                    .iter()
+                    .take(entry_rel_pos)
+                    .any(|rob_entry| match rob_entry.meta {
+                        MetaData::Store(Operand::Rob(_), _) => true,
+                        MetaData::Store(Operand::Value(addr), _) => {
                             if addr == entry.addr {
                                 true
                             } else {
                                 false
                             }
-                        },
-                        _ => false
-                    }
-                }) {
+                        }
+                        _ => false,
+                    })
+                {
                     continue;
                 }
 

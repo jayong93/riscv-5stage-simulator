@@ -117,9 +117,9 @@ impl Pipeline {
     }
 
     pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
-        use self::reorder_buffer::MetaData::*;
         use self::operand::Operand;
-        let retired_entries = self.rob.retire(&mut self.func_units);
+        use self::reorder_buffer::MetaData::*;
+        let retired_entries = self.rob.retire(&mut self.func_units, &mut self.memory);
 
         for entry in retired_entries.iter() {
             match entry.meta {
@@ -137,9 +137,6 @@ impl Pipeline {
                                 .write(entry.pc + crate::consts::WORD_SIZE as u32);
                         }
                     }
-                }
-                Store(Operand::Value(addr)) => {
-                    self.memory.write(addr, entry.value).unwrap();
                 }
                 Normal(reg) => {
                     self.reg.gpr[reg as usize].write(entry.value);
@@ -178,34 +175,41 @@ impl Pipeline {
 
     pub fn process_rs_entry(&mut self, entry: self::reservation_staion::RSEntry) {
         use self::reorder_buffer::MetaData;
-        let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
-        if entry.inst.function == Function::Jalr {
-            self.reg.pc.write(entry.value);
-        } else if let MetaData::Branch {
-            pred_taken: pred,
-            is_taken: _,
-        } = rob_entry.meta
+        let is_ready;
         {
-            // branch의 결과값은 meta에 쓴다.
-            rob_entry.meta = MetaData::Branch {
-                is_taken: if entry.value == 0 { false } else { true },
+            let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
+            is_ready = rob_entry.is_ready;
+            if entry.inst.function == Function::Jalr {
+                self.reg.pc.write(entry.value);
+            } else if let MetaData::Branch {
                 pred_taken: pred,
-            };
-        } else if !rob_entry.is_ready {
-            self.lb.propagate(entry.rob_index, entry.value);
-            self.rs.propagate(entry.rob_index, entry.value);
-            self.rob.propagate(entry.rob_index, entry.value);
-            rob_entry.value = Some(entry.value);
+                is_taken: _,
+            } = rob_entry.meta
+            {
+                // branch의 결과값은 meta에 쓴다.
+                rob_entry.meta = MetaData::Branch {
+                    is_taken: if entry.value == 0 { false } else { true },
+                    pred_taken: pred,
+                };
+            } else if !rob_entry.is_ready {
+                self.lb.propagate(entry.rob_index, entry.value);
+                self.rs.propagate(entry.rob_index, entry.value);
+                rob_entry.value = entry.value;
+            }
+            rob_entry.is_ready = true;
         }
-        rob_entry.is_ready = true;
+        if is_ready {
+            self.rob.propagate(entry.rob_index, entry.value);
+        }
     }
 
     pub fn process_lb_entry(&mut self, entry: self::load_buffer::LoadBufferEntry) {
+        self.rob.propagate(entry.rob_index, entry.value);
+
         let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
         self.lb.propagate(entry.rob_index, entry.value);
         self.rs.propagate(entry.rob_index, entry.value);
-        self.rob.propagate(entry.rob_index, entry.value);
-        rob_entry.value = Some(entry.value);
+        rob_entry.value = entry.value;
         rob_entry.is_ready = true;
     }
 
@@ -222,10 +226,12 @@ impl Pipeline {
 
     pub fn execute(&mut self) {
         self.rs.execute(&self.rob, &mut self.func_units);
-        self.lb.execute(&self.rob, &mut self.func_units, &self.memory);
+        self.lb
+            .execute(&self.rob, &mut self.func_units, &self.memory);
     }
 
     pub fn issue(&mut self) {
+        use self::Opcode::*;
         // if a last instruction in ROB is either Jalr or Ecall,
         // stop fetching until the instruction is ready to commit.
         let has_to_stall = self
@@ -248,15 +254,21 @@ impl Pipeline {
         let insts: Vec<_> = (0..2)
             .map(|_| {
                 let raw_inst = self.memory.read_inst(pc);
-                let retval = (pc, Instruction::new(raw_inst));
+                let old_pc = pc;
                 pc += consts::WORD_SIZE as u32;
-                retval
+                let mut inst = Instruction::new(raw_inst);
+
+                if let Fnmadd | Fnmsub | Fmadd | Fmsub | OpFp | LoadFp | StoreFp = inst.opcode {
+                    inst = Instruction::default();
+                }
+                
+                (old_pc, inst)
             })
             .collect();
         self.reg.pc.write(pc);
 
         for (pc, inst) in insts {
-            let rob_index = self.rob.issue(pc, inst.clone());
+            let rob_index = self.rob.issue(pc, inst.clone(), &self.reg);
             if inst.opcode == crate::instruction::Opcode::Load {
                 self.lb.issue(rob_index, &self.rob, &self.reg);
             } else {

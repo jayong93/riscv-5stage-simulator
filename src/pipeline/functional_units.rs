@@ -1,5 +1,4 @@
 use super::load_buffer::LoadBufferEntry;
-use super::reorder_buffer::ReorderBuffer;
 use super::reservation_staion::RSEntry;
 use instruction::{Function, Instruction, Opcode};
 
@@ -95,9 +94,43 @@ impl FunctionalUnits {
         result
     }
 
-    pub fn execute_store(&mut self, rob_index: usize, entry: &ReorderBuffer) -> Option<()> {
-        // TODO: Store가 아니면 무조건 성공
+    pub fn execute_store(
+        &mut self,
+        func: Function,
+        rob_index: usize,
+        addr: u32,
+        value: u32,
+        mem: &mut crate::memory::ProcessMemory,
+    ) -> Option<()> {
         // 같은 주소의 load가 실행중이면 None 반환
-        unimplemented!()
+        let result;
+        {
+            let unit_entry = self.buf.entry(rob_index).or_insert_with(|| {
+                let (A, B) = (addr, value);
+                FunctionalUnitEntry {
+                    remain_clock: 10,
+                    func: func,
+                    A: A,
+                    B: B,
+                }
+            });
+
+            unit_entry.remain_clock -= 1;
+            let addr = unit_entry.A;
+            result = if unit_entry.remain_clock <= 0 {
+                Some(match unit_entry.func {
+                    Function::Sb => mem.write(addr, value as u8),
+                    Function::Sh => mem.write(addr, value as u16),
+                    Function::Sw => mem.write(addr, value as u32),
+                    _ => unreachable!(),
+                })
+            } else {
+                None
+            };
+        }
+        result.map(|_| {
+            self.buf.remove(&rob_index);
+            ()
+        })
     }
 }
