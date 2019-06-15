@@ -118,7 +118,7 @@ impl Pipeline {
 
     pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
         use self::reorder_buffer::MetaData::*;
-        let retired_entries = self.rob.retire();
+        let retired_entries = self.rob.retire(&mut self.func_units);
 
         for entry in retired_entries.iter() {
             match entry.meta {

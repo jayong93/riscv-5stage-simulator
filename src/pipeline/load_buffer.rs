@@ -3,6 +3,7 @@ use super::operand::Operand;
 use super::reorder_buffer::{MetaData, ReorderBuffer};
 use register::RegisterFile;
 use std::collections::VecDeque;
+use instruction::Function;
 
 #[derive(Debug, Clone)]
 pub enum LoadBufferStatus {
@@ -15,6 +16,7 @@ pub enum LoadBufferStatus {
 pub struct LoadBufferEntry {
     pub rob_index: usize,
     pub status: LoadBufferStatus,
+    pub func: Function,
     pub base: Operand,
     pub addr: u32, // initially has imm value.
     pub value: u32,
@@ -53,6 +55,7 @@ impl LoadBuffer {
             rob_index,
             status: LoadBufferStatus::Wait,
             base,
+            func: inst.function,
             addr: inst.fields.imm.unwrap(),
             value: 0,
         };
@@ -99,7 +102,8 @@ impl LoadBuffer {
             }
         }) {
             if let Operand::Value(_) = entry.base {
-                if rob.iter().any(|rob_entry| {
+                let entry_rel_pos = rob.to_relative_pos(entry.rob_index).unwrap();
+                if rob.iter().take(entry_rel_pos).any(|rob_entry| {
                     if let MetaData::Store(store_addr) = rob_entry.meta {
                         if store_addr == entry.addr {
                             return true;

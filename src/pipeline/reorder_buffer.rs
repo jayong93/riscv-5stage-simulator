@@ -1,9 +1,10 @@
+use super::functional_units::FunctionalUnits;
 use instruction::Instruction;
 
 #[derive(Debug, Clone)]
 pub enum MetaData {
     Branch { pred_taken: bool, is_taken: bool },
-    Store(u32),
+    Store(u32), // TODO: Store가 write_result에서 register값 받도록 변경
     Syscall,
     Normal(u8),
 }
@@ -130,8 +131,19 @@ impl ReorderBuffer {
         self.tail = 0;
     }
 
-    pub fn retire(&mut self) -> Vec<ReorderBufferEntry> {
-        let retired_entries: Vec<_> = self.iter().filter(|entry| entry.is_ready).cloned().collect();
+    pub fn retire(&mut self, func_unit: &mut FunctionalUnits) -> Vec<ReorderBufferEntry> {
+        let retired_entries: Vec<_> = self
+            .iter()
+            .take_while(|entry| {
+                entry.is_ready
+                    && if let Some(()) = func_unit.execute_store(&entry) {
+                        true
+                    } else {
+                        false
+                    }
+            })
+            .cloned()
+            .collect();
         self.head = (self.head + retired_entries.len()) % self.buf.len();
         retired_entries
     }

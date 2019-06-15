@@ -21,6 +21,22 @@ pub struct RSEntry {
     pub value: u32,
 }
 
+impl RSEntry {
+    pub fn operand_values(&self) -> (Option<u32>, Option<u32>) {
+        let (op1, op2) = self.operand;
+        let op1 = match op1 {
+            Operand::Rob(_) => None,
+            Operand::Value(v) => Some(v),
+        };
+        let op2 = match op2 {
+            Operand::Rob(_) => None,
+            Operand::Value(v) => Some(v),
+        };
+
+        (op1, op2)
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ReservationStation {
     station: LinkedList<RSEntry>,
@@ -108,6 +124,7 @@ impl ReservationStation {
     }
 
     pub fn execute(&mut self, rob: &ReorderBuffer, func_units: &mut FunctionalUnits) {
+        //TODO: 완료된 작업 제거
         for entry in self.station.iter_mut() {
             match entry.status {
                 RSStatus::Wait => {
