@@ -92,7 +92,7 @@ impl LoadBuffer {
         }
 
         let rob_entry = rob.get(load.rob_index).unwrap();
-        if let Operand::None = rob_entry.addr {
+        if let Operand::None | Operand::Rob(_) = rob_entry.addr {
             return false;
         }
 
@@ -134,7 +134,7 @@ impl LoadBuffer {
                 unreachable!()
             };
 
-            rob_entry.mem_rem_cycle -= 1;
+            rob_entry.mem_rem_cycle = rob_entry.mem_rem_cycle.saturating_sub(1);
             if rob_entry.mem_rem_cycle == 0 {
                 entry.value = MemoryUnit::execute(addr, rob_entry, mem);
                 entry.status = LoadBufferStatus::Finished;

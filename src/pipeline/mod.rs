@@ -15,7 +15,7 @@ use register;
 
 #[derive(Debug, Clone)]
 pub enum SyscallError {
-    NotImpl,
+    NotImpl(u32),
     Error(String),
 }
 
@@ -106,7 +106,7 @@ impl Pipeline {
                 }
                 Ok(addr)
             }
-            _ => Err(SyscallError::NotImpl),
+            _ => Err(SyscallError::NotImpl(reg.gpr[crate::consts::SYSCALL_NUM_REG].read())),
         };
         result.map(|ret_val| {
             reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
@@ -115,6 +115,7 @@ impl Pipeline {
     }
 
     pub fn commit(&mut self) -> Vec<(usize, ReorderBufferEntry)> {
+        use instruction::Opcode;
         let mut completed_entries = self.rob.completed_entries();
         let retired_count = completed_entries
             .iter()
@@ -122,12 +123,20 @@ impl Pipeline {
                 let should_cancel = entry.retire(*old_idx, &mut self.memory, &mut self.reg);
                 if should_cancel {
                     self.clear_all_buffers();
+                    if let (Opcode::Branch, Some(is_taken)) = (entry.inst.opcode, entry.reg_value) {
+                        if is_taken == 1 {
+                            self.reg.pc.write(entry.pc.wrapping_add(entry.inst.fields.imm.unwrap()));
+                        } else {
+                            self.reg.pc.write(entry.pc.wrapping_add(crate::consts::WORD_SIZE as u32));
+                        }
+                    }
                 }
                 should_cancel
             })
             .take_while(|&should_cancel| !should_cancel)
             .count();
-        completed_entries.truncate(retired_count);
+        let total_len = completed_entries.len();
+        completed_entries.truncate(std::cmp::min(retired_count+1, total_len));
         completed_entries
     }
 
@@ -192,12 +201,12 @@ impl Pipeline {
             }
 
             let (npc, has_to_stop) = match inst.opcode {
-                Opcode::Jal => (pc + inst.fields.imm.unwrap(), true),
+                Opcode::Jal => (pc.wrapping_add(inst.fields.imm.unwrap()), true),
                 Opcode::Jalr => (pc, true),
                 Opcode::System if inst.function == Function::Ecall => {
-                    (pc + consts::WORD_SIZE as u32, true)
+                    (pc.wrapping_add(consts::WORD_SIZE as u32), true)
                 }
-                _ => (pc + consts::WORD_SIZE as u32, false),
+                _ => (pc.wrapping_add(consts::WORD_SIZE as u32), false),
             };
             self.reg.pc.write(npc);
 

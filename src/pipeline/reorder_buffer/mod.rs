@@ -52,10 +52,10 @@ impl ReorderBufferEntry {
         if let Opcode::Branch = self.inst.opcode {
             if let Some(branch_result) = self.reg_value {
                 if branch_result == self.branch_pred as u32 {
-                    return true;
+                    return false;
                 }
             }
-            return false;
+            return true;
         }
 
         if let Function::Ecall = self.inst.function {
@@ -87,8 +87,8 @@ pub struct ReorderBuffer {
 
 impl std::fmt::Display for ReorderBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-        self.iter_with_id().for_each(|entry| {write!(f, "{:?}\n", entry);});
+        write!(f, "[\n")?;
+        self.iter_with_id().for_each(|entry| {write!(f, "{:?}\n", entry).unwrap();});
         write!(f, "]")
     }
 }

@@ -94,10 +94,7 @@ impl ReservationStation {
                         Operand::Value(inst.fields.imm.unwrap()),
                     ),
                     Opcode::Lui => (Operand::Value(0), Operand::Value(inst.fields.imm.unwrap())),
-                    Opcode::Amo => {
-                        self.address_unit.issue(rob_index, inst.clone(), reg, rob);
-                        (Operand::Value(0), Operand::Value(0))
-                    }
+                    Opcode::Amo => (Operand::Value(0), Operand::Value(0)),
                     _ => {
                         let op1 = inst.fields.rs1.unwrap_or(0);
                         let op1 = reg.get_reg_value(op1, rob);
