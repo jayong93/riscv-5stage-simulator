@@ -125,7 +125,7 @@ impl LoadBuffer {
             if !Self::is_load_ready(entry, rob) {
                 continue;
             }
-            entry.status = LoadBufferStatus::Finished;
+            entry.status = LoadBufferStatus::Execute;
 
             let rob_entry = rob.get_mut(*idx).unwrap();
             let addr = if let Operand::Value(a) = rob_entry.addr {

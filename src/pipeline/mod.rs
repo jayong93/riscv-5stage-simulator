@@ -177,7 +177,7 @@ impl Pipeline {
         }
 
         for _ in 0..2 {
-            let pc = dbg!(self.reg.pc.read());
+            let pc = self.reg.pc.read();
             let raw_inst = self.memory.read_inst(pc);
             let mut inst = Instruction::new(raw_inst);
             if let Opcode::Fmadd

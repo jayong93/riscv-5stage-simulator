@@ -240,14 +240,6 @@ impl ReorderBuffer {
     }
 
     pub fn completed_entries(&mut self) -> Vec<(usize, ReorderBufferEntry)> {
-        {
-            if let Some(rob_entry) = self.iter().next() {
-                if rob_entry.pc == 0x104c0 {
-                    eprintln!("{:?}", rob_entry);
-                    eprintln!("rob: {}", self);
-                }
-            }
-        }
         let completed: Vec<_> = self
             .iter_with_id()
             .take_while(|(_, entry)| entry.is_completed())
