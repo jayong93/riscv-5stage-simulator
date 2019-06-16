@@ -31,8 +31,8 @@ impl AddressUnit {
             remaining_clock: 1,
         };
         {
-            if rob.get(rob_idx).unwrap().pc == 0x104c0 {
-                eprintln!("{:?}", entry)
+            if rob.get(rob_idx).unwrap().pc == 0x295ec {
+                eprintln!("{:?}", entry);
             }
         }
         self.buf.insert(rob_idx, entry);
@@ -60,13 +60,10 @@ impl AddressUnit {
                 if let (Operand::Value(reg_val), Operand::Value(imm)) = entry.operand {
                     entry.value = reg_val.wrapping_add(imm);
                     entry.status = RSStatus::Finished;
-                    let rob_entry_is_none = rob.get_mut(*rob_idx).is_none();
-                    if rob_entry_is_none {
-                        eprintln!("index: {:?}", rob_idx);
-                        eprintln!("rob: {:?}", rob);
-                        eprintln!("addr entry: {:?}", entry);
-                    }
                     let rob_entry = rob.get_mut(*rob_idx).unwrap();
+                    if rob_entry.pc == 0x295ec {
+                        eprintln!("{:?}", entry);
+                    }
                     rob_entry.addr = Operand::Value(entry.value);
                     Some((
                         rob_idx,

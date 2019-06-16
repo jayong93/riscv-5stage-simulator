@@ -27,12 +27,8 @@ impl ReorderBufferEntry {
         } else {
             false
         };
-        let addr_done = if let Operand::Value(addr) = self.addr {
-            if addr == 0 {
-                false
-            } else {
-                true
-            }
+        let addr_done = if let Operand::Value(_) = self.addr {
+            true
         } else {
             false
         };

@@ -41,6 +41,7 @@ impl Pipeline {
     fn clear_all_buffers(&mut self) {
         self.rs.clear();
         self.rob.clear();
+        self.reg.related_rob.iter_mut().for_each(|stat| *stat = None);
     }
 
     pub fn system_call(
