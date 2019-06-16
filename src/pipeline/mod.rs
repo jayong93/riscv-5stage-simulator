@@ -26,7 +26,6 @@ pub struct Pipeline {
     pub memory: memory::ProcessMemory,
     pub rob: reorder_buffer::ReorderBuffer,
     pub rs: reservation_staion::ReservationStation,
-    pub lb: load_buffer::LoadBuffer,
 }
 
 impl Pipeline {
@@ -36,13 +35,11 @@ impl Pipeline {
             memory,
             rob: Default::default(),
             rs: Default::default(),
-            lb: Default::default(),
         }
     }
 
     fn clear_all_buffers(&mut self) {
         self.rs.clear();
-        self.lb.clear();
         self.rob.clear();
     }
 
@@ -179,7 +176,7 @@ impl Pipeline {
         }
 
         for _ in 0..2 {
-            let pc = self.reg.pc.read();
+            let pc = dbg!(self.reg.pc.read());
             let raw_inst = self.memory.read_inst(pc);
             let mut inst = Instruction::new(raw_inst);
             if let Opcode::Fmadd

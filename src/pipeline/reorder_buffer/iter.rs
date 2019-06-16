@@ -1,46 +1,43 @@
 use super::ReorderBufferEntry;
+use std::collections::{HashMap, VecDeque};
 
+#[derive(Debug, Clone)]
 pub struct Iter<'a> {
-    pub rob: &'a Vec<ReorderBufferEntry>,
-    pub head: usize,
-    pub tail: usize,
+    pub index_queue: &'a VecDeque<usize>,
+    pub index_map: &'a HashMap<usize, usize>,
+    pub buf: &'a Vec<(usize, ReorderBufferEntry)>,
+    pub cur_head: usize,
+    pub cur_tail: usize,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = &'a ReorderBufferEntry;
+    type Item = &'a (usize, ReorderBufferEntry);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.head == self.tail {
+        if self.cur_head == self.cur_tail {
             return None;
         }
-        let old_head = self.head;
-        self.head = (self.head + 1) % self.rob.len();
-        self.rob.get(old_head)
+        let idx = *self.index_queue.get(self.cur_head).unwrap();
+        self.cur_head += 1;
+        let raw_idx = *self.index_map.get(&idx).unwrap();
+        self.buf.get(raw_idx)
     }
 }
 
 impl<'a> ExactSizeIterator for Iter<'a> {
     fn len(&self) -> usize {
-        let tail = if self.tail < self.head {
-            self.tail + self.rob.len()
-        } else {
-            self.tail
-        };
-        tail - self.head
+        self.cur_tail - self.cur_head
     }
 }
 
 impl<'a> DoubleEndedIterator for Iter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.head == self.tail {
+        if self.cur_head == self.cur_tail {
             return None;
         }
-        let old_tail = self.tail;
-        self.tail = if self.tail == 0 {
-            self.rob.len() - 1
-        } else {
-            self.tail - 1
-        };
-        self.rob.get(old_tail)
+        let idx = self.index_queue.get(self.cur_tail-1).unwrap();
+        self.cur_tail -= 1;
+        let raw_idx = *self.index_map.get(&idx).unwrap();
+        self.buf.get(raw_idx)
     }
 }

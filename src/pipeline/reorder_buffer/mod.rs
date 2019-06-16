@@ -5,6 +5,8 @@ use memory::ProcessMemory;
 use pipeline::reservation_staion::FinishedCalc;
 use pipeline::Pipeline;
 use register::RegisterFile;
+use std::collections::{HashMap, VecDeque};
+use std::fmt::Debug;
 
 #[derive(Debug, Default, Clone)]
 pub struct ReorderBufferEntry {
@@ -78,27 +80,69 @@ impl ReorderBufferEntry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ReorderBuffer {
-    buf: Vec<ReorderBufferEntry>,
-    head: usize,
-    tail: usize,
+    highst_index: usize,
+    unused_indies: VecDeque<usize>,
+    index_queue: VecDeque<usize>,
+    index_map: HashMap<usize, usize>,
+    buf: Vec<(usize, ReorderBufferEntry)>,
 }
 
-impl Default for ReorderBuffer {
-    fn default() -> Self {
-        ReorderBuffer {
-            buf: vec![ReorderBufferEntry::default()],
-            head: 0,
-            tail: 0,
-        }
+impl std::fmt::Display for ReorderBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[")?;
+        self.iter_with_id().for_each(|entry| {write!(f, "{:?}\n", entry);});
+        write!(f, "]")
     }
 }
 
 impl ReorderBuffer {
     pub fn clear(&mut self) {
-        self.head = 0;
-        self.tail = 0;
+        self.unused_indies.clear();
+        self.index_map.clear();
+        self.index_queue.clear();
+        self.buf.clear();
+    }
+
+    fn register_new_index(&mut self) -> usize {
+        self.unused_indies.pop_front().unwrap_or_else(|| {
+            let new_index = self.highst_index;
+            self.highst_index += 1;
+            new_index
+        })
+    }
+
+    fn add(&mut self, entry: ReorderBufferEntry) -> usize {
+        let index = self.register_new_index();
+        self.index_queue.push_back(index);
+        self.buf.push((index, entry));
+        self.index_map.insert(index, self.buf.len() - 1);
+        index
+    }
+
+    pub fn pop_front(&mut self) -> Option<ReorderBufferEntry> {
+        if self.buf.is_empty() {
+            return None;
+        }
+
+        let index = self.index_queue.pop_front().unwrap();
+        if let Some(raw_idx_to_remove) = self.index_map.remove(&index) {
+            let last_idx;
+            {
+                let (idx, _) = self.buf.last().unwrap();
+                last_idx = *idx;
+            }
+            let (_, removed_entry) = self.buf.swap_remove(raw_idx_to_remove);
+            if let Some(last_raw_idx) = self.index_map.get_mut(&last_idx) {
+                *last_raw_idx = raw_idx_to_remove;
+            }
+            self.unused_indies.push_back(index);
+
+            Some(removed_entry)
+        } else {
+            None
+        }
     }
 
     pub fn issue(
@@ -107,38 +151,29 @@ impl ReorderBuffer {
         inst: Instruction,
         reg: &crate::register::RegisterFile,
     ) -> usize {
-        let real_len = self.buf.len() - 1;
-        if real_len <= self.len() {
-            if real_len == 0 {
-                self.buf.resize_with(2, Default::default);
-            } else {
-                self.buf.resize_with(real_len * 2 + 1, Default::default);
-            }
-        }
-
         let (mem_value, addr) = match inst.opcode {
             Opcode::Store => (
-                reg.get_reg_value(inst.fields.rs2.unwrap()),
+                reg.get_reg_value(inst.fields.rs2.unwrap(), self),
                 Operand::default(),
             ),
             Opcode::Amo => (
-                reg.get_reg_value(inst.fields.rs2.unwrap()),
-                reg.get_reg_value(inst.fields.rs1.unwrap()),
+                reg.get_reg_value(inst.fields.rs2.unwrap(), self),
+                reg.get_reg_value(inst.fields.rs1.unwrap(), self),
             ),
             _ => (Operand::default(), Operand::default()),
         };
-        let reg_value = match inst.opcode {
-            Opcode::Jal | Opcode::Jalr => Some(pc + crate::consts::WORD_SIZE as u32),
-            Opcode::Lui => Some(inst.fields.imm.unwrap()),
-            Opcode::AuiPc => Some(pc + inst.fields.imm.unwrap()),
-            Opcode::Amo if inst.function == Function::Scw => Some(0),
-            _ => None,
-        };
+        // let reg_value = match inst.opcode {
+        //     Opcode::Jal | Opcode::Jalr => Some(pc + crate::consts::WORD_SIZE as u32),
+        //     Opcode::Lui => Some(inst.fields.imm.unwrap()),
+        //     Opcode::AuiPc => Some(pc + inst.fields.imm.unwrap()),
+        //     Opcode::Amo if inst.function == Function::Scw => Some(0),
+        //     _ => None,
+        // };
         let rd = inst.fields.rd.unwrap_or(0);
         let new_entry = ReorderBufferEntry {
             pc,
             inst,
-            reg_value,
+            reg_value: None,
             mem_value,
             rd,
             addr,
@@ -146,71 +181,52 @@ impl ReorderBuffer {
             mem_rem_cycle: crate::consts::MEM_CYCLE,
         };
 
-        self.buf[self.tail] = new_entry;
-        let rob_index = self.tail;
-        self.tail = (self.tail + 1) % self.buf.len();
-        rob_index
+        self.add(new_entry)
     }
 
     pub fn len(&self) -> usize {
-        let tail = if self.tail < self.head {
-            self.tail + self.buf.len()
-        } else {
-            self.tail
-        };
-        tail - self.head
-    }
-
-    pub fn to_relative_pos(&self, index: usize) -> Option<usize> {
-        self.get(index).and_then(|_| {
-            if self.head <= index {
-                Some(index - self.head)
-            } else if index < self.tail {
-                Some(self.len() - (self.tail - index))
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn to_index(&self, relative_pos: usize) -> Option<usize> {
-        if self.head + relative_pos >= self.buf.len() * 2 {
-            None
-        } else {
-            Some((self.head + relative_pos) % self.buf.len())
-        }
+        self.buf.len()
     }
 
     pub fn get(&self, index: usize) -> Option<&ReorderBufferEntry> {
-        if index < self.tail || self.head <= index {
-            self.buf.get(index)
-        } else {
-            None
-        }
+        self.index_map
+            .get(&index)
+            .and_then(|&raw_idx| self.buf.get(raw_idx))
+            .map(|(_, entry)| entry)
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut ReorderBufferEntry> {
-        if index < self.tail || self.head <= index {
-            self.buf.get_mut(index)
+        if let Some(raw_idx) = self.index_map.get(&index) {
+            self.buf.get_mut(*raw_idx).map(|(_, entry)| entry)
         } else {
             None
         }
     }
 
-    pub fn iter(&self) -> iter::Iter {
+    pub fn iter(&self) -> impl Iterator<Item = &ReorderBufferEntry> + DoubleEndedIterator + Debug {
+        self.iter_with_id().map(|pair| &pair.1)
+    }
+
+    pub fn nth_index(&self, n: usize) -> Option<usize> {
+        self.index_queue.get(n).map(|idx| *idx)
+    }
+
+    pub fn iter_with_id(
+        &self,
+    ) -> impl Iterator<Item = &(usize, ReorderBufferEntry)> + DoubleEndedIterator + Debug {
         iter::Iter {
-            rob: &self.buf,
-            tail: self.tail,
-            head: self.head,
+            index_map: &self.index_map,
+            index_queue: &self.index_queue,
+            buf: &self.buf,
+            cur_head: 0,
+            cur_tail: self.index_queue.len(),
         }
     }
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
-        for rel_pos in 0..self.len() {
-            let idx = self.to_index(rel_pos).unwrap();
-            let entry = self.get_mut(idx).unwrap();
+        for (idx, entry) in self.buf.iter_mut() {
 
-            if idx == job.rob_idx {
+            if *idx == job.rob_idx {
                 entry.reg_value = Some(job.reg_value);
                 continue;
             }
@@ -228,15 +244,23 @@ impl ReorderBuffer {
     }
 
     pub fn completed_entries(&mut self) -> Vec<(usize, ReorderBufferEntry)> {
+        {
+            if let Some(rob_entry) = self.iter().next() {
+                if rob_entry.pc == 0x104c0 {
+                    eprintln!("{:?}", rob_entry);
+                    eprintln!("rob: {}", self);
+                }
+            }
+        }
         let completed: Vec<_> = self
-            .iter()
-            .enumerate()
+            .iter_with_id()
             .take_while(|(_, entry)| entry.is_completed())
-            .map(|(rel_pos, entry)| (self.to_index(rel_pos).unwrap(), entry.clone()))
+            .map(|(idx, _)| *idx)
             .collect();
 
-        self.head = (self.head + completed.len()) % self.buf.len();
-
         completed
+            .into_iter()
+            .map(|idx| (idx, self.pop_front().unwrap()))
+            .collect()
     }
 }

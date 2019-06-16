@@ -1,0 +1,4 @@
+    Finished dev [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/casim ../hello_riscv --print-steps`
+Clock #2 | pc: 10338 | val: 034000ef | inst: Jal | fields: [ rd: 1, imm: 34, ]
+Clock #3 | pc: 1036c | val: 00071197 | inst: AuiPc | fields: [ rd: 3, imm: 71000, ]

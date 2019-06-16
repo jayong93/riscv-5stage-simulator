@@ -16,23 +16,26 @@ pub struct AddressUnit {
  * Jalr은 거기에 PC까지 같이 갱신해야 함.
  */
 impl AddressUnit {
-    pub fn issue(&mut self, rob_idx: usize, inst: Instruction, reg: &RegisterFile) {
+    pub fn clear(&mut self) {
+        self.buf.clear()
+    }
+    pub fn issue(&mut self, rob_idx: usize, inst: Instruction, reg: &RegisterFile, rob: &ReorderBuffer) {
         let rs1 = inst.fields.rs1.unwrap();
-        let imm = inst.fields.imm.unwrap();
-        self.buf.insert(
-            rob_idx,
-            RSEntry {
-                rob_index: rob_idx,
-                status: RSStatus::Wait,
-                inst,
-                operand: (
-                    reg.get_reg_value(rs1),
-                    Operand::Value(imm),
-                ),
-                value: 0,
-                remaining_clock: 1,
-            },
-        );
+        let imm = inst.fields.imm.unwrap_or(0);
+        let entry = RSEntry {
+            rob_index: rob_idx,
+            status: RSStatus::Wait,
+            inst,
+            operand: (reg.get_reg_value(rs1, rob), Operand::Value(imm)),
+            value: 0,
+            remaining_clock: 1,
+        };
+        {
+            if rob.get(rob_idx).unwrap().pc == 0x104c0 {
+                eprintln!("{:?}", entry)
+            }
+        }
+        self.buf.insert(rob_idx, entry);
     }
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
@@ -55,8 +58,14 @@ impl AddressUnit {
             .iter_mut()
             .filter_map(|(rob_idx, entry)| {
                 if let (Operand::Value(reg_val), Operand::Value(imm)) = entry.operand {
-                    entry.value = reg_val + imm;
+                    entry.value = reg_val.wrapping_add(imm);
                     entry.status = RSStatus::Finished;
+                    let rob_entry_is_none = rob.get_mut(*rob_idx).is_none();
+                    if rob_entry_is_none {
+                        eprintln!("index: {:?}", rob_idx);
+                        eprintln!("rob: {:?}", rob);
+                        eprintln!("addr entry: {:?}", entry);
+                    }
                     let rob_entry = rob.get_mut(*rob_idx).unwrap();
                     rob_entry.addr = Operand::Value(entry.value);
                     Some((

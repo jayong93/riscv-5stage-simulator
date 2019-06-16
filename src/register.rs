@@ -1,7 +1,8 @@
 //! 32-bit register and RV32I register file.
 
-use std::fmt;
 use pipeline::operand::Operand;
+use pipeline::reorder_buffer::ReorderBuffer;
+use std::fmt;
 
 type RegisterStat = Option<usize>;
 
@@ -39,12 +40,22 @@ impl RegisterFile {
         reg_file
     }
 
-    pub fn get_reg_value(&self, reg: u8) -> Operand {
-        self.related_rob[reg as usize].map(|idx| Operand::Rob(idx)).unwrap_or(Operand::Value(self.gpr[reg as usize].read()))
+    pub fn get_reg_value(&self, reg: u8, rob: &ReorderBuffer) -> Operand {
+        self.related_rob[reg as usize]
+            .map(|idx| {
+                rob.get(idx)
+                    .unwrap()
+                    .reg_value
+                    .map(|val| Operand::Value(val))
+                    .unwrap_or(Operand::Rob(idx))
+            })
+            .unwrap_or(Operand::Value(self.gpr[reg as usize].read()))
     }
-    
+
     pub fn set_reg_rob_index(&mut self, reg: u8, rob_idx: usize) {
-        if reg == 0 {return;}
+        if reg == 0 {
+            return;
+        }
         self.related_rob[reg as usize] = Some(rob_idx);
     }
 }

@@ -53,7 +53,7 @@ impl LoadBuffer {
                     LoadBufferEntry {
                         rob_index,
                         status: LoadBufferStatus::Wait,
-                        base: reg.get_reg_value(inst.fields.rs1.unwrap()),
+                        base: reg.get_reg_value(inst.fields.rs1.unwrap(), rob),
                         addr: inst.fields.imm.unwrap_or(0),
                         value: 0,
                     },
@@ -85,37 +85,28 @@ impl LoadBuffer {
             .collect()
     }
 
-    pub fn propagate(&mut self, job: &FinishedCalc) {
-        // Amo 연산들은 rs2도 전파되어야 retire
-        for (_, entry) in self.buf.iter_mut() {
-            if let Operand::Rob(index) = entry.base {
-                if index == job.rob_idx {
-                    entry.base = Operand::Value(job.reg_value);
-                    entry.addr += job.reg_value;
-                }
-            }
-        }
-    }
-
     fn is_load_ready(load: &LoadBufferEntry, rob: &ReorderBuffer) -> bool {
         use instruction::Function;
         if let LoadBufferStatus::Finished = load.status {
             return false;
         }
-        if let Operand::Rob(_) = load.base {
+
+        let rob_entry = rob.get(load.rob_index).unwrap();
+        if let Operand::None = rob_entry.addr {
             return false;
         }
 
-        let rob_entry = rob.get(load.rob_index).unwrap();
+        // Amo는 RS2까지 대기하다가 실행
         if let Opcode::Amo = rob_entry.inst.opcode {
             if let Operand::Rob(_) = rob_entry.mem_value {
                 return false;
             }
         }
 
-        let has_to_wait = rob.iter()
-            .take(rob.to_relative_pos(load.rob_index).unwrap())
-            .any(|entry| match entry.inst.opcode {
+        let has_to_wait = rob
+            .iter_with_id()
+            .take_while(|(id, _)| *id != load.rob_index)
+            .any(|(_, entry)| match entry.inst.opcode {
                 Opcode::Store | Opcode::Amo if entry.inst.function != Function::Lrw => {
                     match entry.addr {
                         Operand::Rob(_) => true,
@@ -137,9 +128,15 @@ impl LoadBuffer {
             entry.status = LoadBufferStatus::Finished;
 
             let rob_entry = rob.get_mut(*idx).unwrap();
+            let addr = if let Operand::Value(a) = rob_entry.addr {
+                a
+            } else {
+                unreachable!()
+            };
+
             rob_entry.mem_rem_cycle -= 1;
             if rob_entry.mem_rem_cycle == 0 {
-                entry.value = MemoryUnit::execute(entry.addr, rob_entry, mem);
+                entry.value = MemoryUnit::execute(addr, rob_entry, mem);
                 entry.status = LoadBufferStatus::Finished;
             }
         }

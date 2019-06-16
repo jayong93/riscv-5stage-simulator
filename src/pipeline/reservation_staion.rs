@@ -28,12 +28,12 @@ impl RSEntry {
     pub fn operand_values(&self) -> (Option<u32>, Option<u32>) {
         let (op1, op2) = self.operand;
         let op1 = match op1 {
-            Operand::Rob(_) => None,
             Operand::Value(v) => Some(v),
+            _ => None,
         };
         let op2 = match op2 {
-            Operand::Rob(_) => None,
             Operand::Value(v) => Some(v),
+            _ => None,
         };
 
         (op1, op2)
@@ -50,32 +50,64 @@ pub struct ReservationStation {
 impl ReservationStation {
     pub fn clear(&mut self) {
         self.station.clear();
+        self.load_buf.clear();
+        self.address_unit.clear();
     }
 
     pub fn issue(&mut self, rob_index: usize, rob: &ReorderBuffer, reg: &RegisterFile) {
         let rob_entry = rob.get(rob_index).unwrap();
         let inst = &rob_entry.inst;
         match inst.opcode {
-            Opcode::Store => self.address_unit.issue(rob_index, inst.clone(), reg),
+            Opcode::Store => self.address_unit.issue(rob_index, inst.clone(), reg, rob),
             Opcode::Load => {
-                self.address_unit.issue(rob_index, inst.clone(), reg);
+                self.address_unit.issue(rob_index, inst.clone(), reg, rob);
                 self.load_buf.issue(rob_index, rob, reg);
             }
             Opcode::Amo if inst.function != Function::Scw => {
                 self.load_buf.issue(rob_index, rob, reg);
             }
-            Opcode::Jalr => self.address_unit.issue(rob_index, inst.clone(), reg),
-            Opcode::AuiPc | Opcode::Lui | Opcode::Jal | Opcode::Amo => {}
+            Opcode::Jalr => {
+                self.address_unit.issue(rob_index, inst.clone(), reg, rob);
+                self.station.insert(
+                    rob_index,
+                    RSEntry {
+                        rob_index,
+                        status: RSStatus::Wait,
+                        inst: inst.clone(),
+                        operand: (
+                            Operand::Value(rob_entry.pc),
+                            Operand::Value(crate::consts::WORD_SIZE as u32),
+                        ),
+                        value: 0,
+                        remaining_clock: Self::remain_clock(inst.function),
+                    },
+                );
+            }
             _ => {
-                let operand = {
-                    let op1 = inst.fields.rs1.unwrap_or(0);
-                    let op1 = reg.get_reg_value(op1);
-                    let op2 = inst
-                        .fields
-                        .rs2
-                        .map(|r| reg.get_reg_value(r))
-                        .unwrap_or(Operand::Value(inst.fields.imm.unwrap_or(0)));
-                    (op1, op2)
+                let operand = match inst.opcode {
+                    Opcode::Jal => (
+                        Operand::Value(rob_entry.pc),
+                        Operand::Value(crate::consts::WORD_SIZE as u32),
+                    ),
+                    Opcode::AuiPc => (
+                        Operand::Value(rob_entry.pc),
+                        Operand::Value(inst.fields.imm.unwrap()),
+                    ),
+                    Opcode::Lui => (Operand::Value(0), Operand::Value(inst.fields.imm.unwrap())),
+                    Opcode::Amo => {
+                        self.address_unit.issue(rob_index, inst.clone(), reg, rob);
+                        (Operand::Value(0), Operand::Value(0))
+                    }
+                    _ => {
+                        let op1 = inst.fields.rs1.unwrap_or(0);
+                        let op1 = reg.get_reg_value(op1, rob);
+                        let op2 = inst
+                            .fields
+                            .rs2
+                            .map(|r| reg.get_reg_value(r, rob))
+                            .unwrap_or(Operand::Value(inst.fields.imm.unwrap_or(0)));
+                        (op1, op2)
+                    }
                 };
 
                 self.station.insert(
@@ -95,7 +127,6 @@ impl ReservationStation {
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
         self.address_unit.propagate(job);
-        self.load_buf.propagate(job);
 
         for entry in self.station.values_mut() {
             let (op1, op2) = entry.operand;
@@ -118,14 +149,11 @@ impl ReservationStation {
         self.load_buf.execute(rob, mem);
 
         // Store
-        let head_entry = rob.to_index(0).and_then(|idx| rob.get_mut(idx));
+        let head_entry = rob.nth_index(0).and_then(|idx| rob.get_mut(idx));
         if let Some(head) = head_entry {
             match head.inst.opcode {
                 Opcode::Store | Opcode::Amo if head.inst.function != Function::Lrw => {
-                    super::functional_units::memory::MemoryUnit::execute_store(
-                        head,
-                        mem,
-                    )
+                    super::functional_units::memory::MemoryUnit::execute_store(head, mem)
                 }
                 _ => {}
             }
