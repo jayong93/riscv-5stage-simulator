@@ -96,7 +96,20 @@ impl ReservationStation {
     pub fn propagate(&mut self, job: &FinishedCalc) {
         self.address_unit.propagate(job);
         self.load_buf.propagate(job);
-        unimplemented!()
+
+        for entry in self.station.values_mut() {
+            let (op1, op2) = entry.operand;
+            let ops = [op1, op2];
+            let mut new_op_it = ops.iter().map(|op| match op {
+                Operand::Rob(target_rob) if *target_rob == job.rob_idx => {
+                    Operand::Value(job.reg_value)
+                }
+                _ => *op,
+            });
+            let new_op1 = new_op_it.next().unwrap();
+            let new_op2 = new_op_it.next().unwrap();
+            entry.operand = (new_op1, new_op2);
+        }
     }
 
     // Jalr이 AddressUnit에서 계산 끝난 경우 pc를 반환
@@ -112,8 +125,6 @@ impl ReservationStation {
                     super::functional_units::memory::MemoryUnit::execute_store(
                         head,
                         mem,
-                        rob,
-                        &self.load_buf,
                     )
                 }
                 _ => {}
@@ -126,13 +137,13 @@ impl ReservationStation {
                 continue;
             }
 
-            if let (Operand::Value(A), Operand::Value(B)) = entry.operand {
+            if let (Operand::Value(a), Operand::Value(b)) = entry.operand {
                 if let RSStatus::Wait = entry.status {
                     entry.status = RSStatus::Execute
                 }
                 entry.remaining_clock -= 1;
                 if entry.remaining_clock == 0 {
-                    entry.value = crate::alu::alu(&entry.inst.function, A as i32, B as i32) as u32;
+                    entry.value = crate::alu::alu(&entry.inst.function, a as i32, b as i32) as u32;
                     entry.status = RSStatus::Finished;
                 }
             }
@@ -146,7 +157,7 @@ impl ReservationStation {
             let finished: Vec<_> = self
                 .station
                 .iter()
-                .filter_map(|(idx, entry)| {
+                .filter_map(|(&idx, entry)| {
                     if let RSStatus::Finished = entry.status {
                         Some(idx)
                     } else {
@@ -157,7 +168,7 @@ impl ReservationStation {
 
             finished
                 .into_iter()
-                .map(|idx| self.station.remove(idx).unwrap())
+                .map(|idx| self.station.remove(&idx).unwrap())
                 .map(|entry| FinishedCalc {
                     rob_idx: entry.rob_index,
                     reg_value: entry.value,

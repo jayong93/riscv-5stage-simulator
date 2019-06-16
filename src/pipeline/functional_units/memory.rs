@@ -1,32 +1,26 @@
 use instruction::Function;
 use memory::ProcessMemory;
-use pipeline::load_buffer::LoadBuffer;
 use pipeline::operand::Operand;
-use pipeline::reorder_buffer::{ReorderBufferEntry, ReorderBuffer};
+use pipeline::reorder_buffer::ReorderBufferEntry;
 
 pub struct MemoryUnit();
 
 impl MemoryUnit {
-    fn is_store_ready(store: &ReorderBufferEntry, rob: &ReorderBuffer, load_buf: &LoadBuffer) -> bool {
-        unimplemented!()
-    }
-
     pub fn execute_store(
         store_entry: &mut ReorderBufferEntry,
         mem: &mut ProcessMemory,
-        rob: &ReorderBuffer,
-        load_buf: &LoadBuffer,
     ) {
         use self::Function::*;
-        if Self::is_store_ready(store_entry, rob, load_buf) {
-            if let (Operand::Value(addr), Operand::Value(value)) = (store_entry.addr, store_entry.mem_value) {
-                match store_entry.inst.function {
-                    Sb => mem.write(addr, value as u8),
-                    Sh => mem.write(addr, value as u16),
-                    _ => mem.write(addr, value as u32),
-                }.unwrap();
-                store_entry.mem_rem_cycle = 0;
+        if let (Operand::Value(addr), Operand::Value(value)) =
+            (store_entry.addr, store_entry.mem_value)
+        {
+            match store_entry.inst.function {
+                Sb => mem.write(addr, value as u8),
+                Sh => mem.write(addr, value as u16),
+                _ => mem.write(addr, value as u32),
             }
+            .unwrap();
+            store_entry.mem_rem_cycle = 0;
         }
     }
 
@@ -46,7 +40,14 @@ impl MemoryUnit {
                 } else {
                     unreachable!()
                 };
+
+                if let Lrw = load_entry.inst.function {
+                } else {
+                    load_entry.mem_rem_cycle = crate::consts::MEM_CYCLE;
+                }
+
                 let mem_val = match load_entry.inst.function {
+                    Lrw => 0,
                     Amoaddw => value + value_to_calc,
                     Amoandw => value & value_to_calc,
                     Amoorw => value | value_to_calc,

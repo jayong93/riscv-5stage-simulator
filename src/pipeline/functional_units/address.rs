@@ -1,7 +1,7 @@
 use instruction::{Instruction, Opcode};
 use pipeline::operand::Operand;
 use pipeline::reorder_buffer::ReorderBuffer;
-use pipeline::reservation_staion::{RSEntry, RSStatus, FinishedCalc};
+use pipeline::reservation_staion::{FinishedCalc, RSEntry, RSStatus};
 use register::RegisterFile;
 use std::collections::HashMap;
 
@@ -17,6 +17,8 @@ pub struct AddressUnit {
  */
 impl AddressUnit {
     pub fn issue(&mut self, rob_idx: usize, inst: Instruction, reg: &RegisterFile) {
+        let rs1 = inst.fields.rs1.unwrap();
+        let imm = inst.fields.imm.unwrap();
         self.buf.insert(
             rob_idx,
             RSEntry {
@@ -24,8 +26,8 @@ impl AddressUnit {
                 status: RSStatus::Wait,
                 inst,
                 operand: (
-                    reg.get_reg_value(inst.fields.rs1.unwrap()),
-                    Operand::Value(inst.fields.imm.unwrap()),
+                    reg.get_reg_value(rs1),
+                    Operand::Value(imm),
                 ),
                 value: 0,
                 remaining_clock: 1,
@@ -34,7 +36,16 @@ impl AddressUnit {
     }
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
-        unimplemented!()
+        for entry in self.buf.values_mut() {
+            let (op1, op2) = entry.operand;
+            let new_op1 = match op1 {
+                Operand::Rob(target_rob) if target_rob == job.rob_idx => {
+                    Operand::Value(job.reg_value)
+                }
+                _ => op1,
+            };
+            entry.operand = (new_op1, op2);
+        }
     }
 
     pub fn execute(&mut self, rob: &mut ReorderBuffer) -> Option<u32> {
@@ -60,7 +71,7 @@ impl AddressUnit {
                     None
                 }
             })
-            .fold((Vec::new(), 0u32), |(mut vec, npc), (idx, jalr_val)| {
+            .fold((Vec::new(), 0u32), |(mut vec, npc), (&idx, jalr_val)| {
                 vec.push(idx);
                 if npc == 0 {
                     (vec, jalr_val)
@@ -70,7 +81,7 @@ impl AddressUnit {
             });
 
         for idx in finished_idx {
-            self.buf.remove(idx);
+            self.buf.remove(&idx);
         }
 
         if npc == 0 {

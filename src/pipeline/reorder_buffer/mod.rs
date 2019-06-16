@@ -1,7 +1,10 @@
 pub mod iter;
 use super::operand::Operand;
-use instruction::{Instruction, Opcode};
+use instruction::{Function, Instruction, Opcode};
+use memory::ProcessMemory;
 use pipeline::reservation_staion::FinishedCalc;
+use pipeline::Pipeline;
+use register::RegisterFile;
 
 #[derive(Debug, Default, Clone)]
 pub struct ReorderBufferEntry {
@@ -39,6 +42,39 @@ impl ReorderBufferEntry {
             Opcode::Jalr => addr_done && reg_val_done,
             _ => reg_val_done,
         }
+    }
+
+    // true 반환이면 branch prediction miss
+    pub fn retire(
+        &self,
+        old_index: usize,
+        memory: &mut ProcessMemory,
+        reg: &mut RegisterFile,
+    ) -> bool {
+        if let Opcode::Branch = self.inst.opcode {
+            if let Some(branch_result) = self.reg_value {
+                if branch_result == self.branch_pred as u32 {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if let Function::Ecall = self.inst.function {
+            Pipeline::system_call(memory, reg).unwrap();
+            return false;
+        }
+
+        if let Some(reg_val) = self.reg_value {
+            reg.gpr[self.rd as usize].write(reg_val);
+            if let Some(related_rob) = reg.related_rob[self.rd as usize] {
+                if related_rob == old_index {
+                    reg.related_rob[self.rd as usize] = None;
+                }
+            }
+        }
+
+        false
     }
 }
 
@@ -95,13 +131,14 @@ impl ReorderBuffer {
             Opcode::Jal | Opcode::Jalr => Some(pc + crate::consts::WORD_SIZE as u32),
             Opcode::Lui => Some(inst.fields.imm.unwrap()),
             Opcode::AuiPc => Some(pc + inst.fields.imm.unwrap()),
+            Opcode::Amo if inst.function == Function::Scw => Some(0),
             _ => None,
         };
         let rd = inst.fields.rd.unwrap_or(0);
-        let mut new_entry = ReorderBufferEntry {
+        let new_entry = ReorderBufferEntry {
             pc,
             inst,
-            reg_value: None,
+            reg_value,
             mem_value,
             rd,
             addr,
@@ -169,6 +206,37 @@ impl ReorderBuffer {
     }
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
-        unimplemented!()
+        for rel_pos in 0..self.len() {
+            let idx = self.to_index(rel_pos).unwrap();
+            let entry = self.get_mut(idx).unwrap();
+
+            if idx == job.rob_idx {
+                entry.reg_value = Some(job.reg_value);
+                continue;
+            }
+
+            let ops = [entry.addr, entry.mem_value];
+            let mut it = ops.into_iter().map(|op| match op {
+                Operand::Rob(target_rob) if *target_rob == job.rob_idx => {
+                    Operand::Value(job.reg_value)
+                }
+                _ => *op,
+            });
+            entry.addr = it.next().unwrap();
+            entry.mem_value = it.next().unwrap();
+        }
+    }
+
+    pub fn completed_entries(&mut self) -> Vec<(usize, ReorderBufferEntry)> {
+        let completed: Vec<_> = self
+            .iter()
+            .enumerate()
+            .take_while(|(_, entry)| entry.is_completed())
+            .map(|(rel_pos, entry)| (self.to_index(rel_pos).unwrap(), entry.clone()))
+            .collect();
+
+        self.head = (self.head + completed.len()) % self.buf.len();
+
+        completed
     }
 }

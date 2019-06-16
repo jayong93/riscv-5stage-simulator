@@ -9,11 +9,12 @@ pub mod reservation_staion;
 
 use self::reorder_buffer::ReorderBufferEntry;
 use consts;
-use instruction::{Function, Instruction, Opcode};
+use instruction::Function;
 use memory;
 use register;
 
-enum SyscallError {
+#[derive(Debug, Clone)]
+pub enum SyscallError {
     NotImpl,
     Error(String),
 }
@@ -26,7 +27,6 @@ pub struct Pipeline {
     pub rob: reorder_buffer::ReorderBuffer,
     pub rs: reservation_staion::ReservationStation,
     pub lb: load_buffer::LoadBuffer,
-    pub func_units: functional_units::FunctionalUnits,
 }
 
 impl Pipeline {
@@ -37,7 +37,6 @@ impl Pipeline {
             rob: Default::default(),
             rs: Default::default(),
             lb: Default::default(),
-            func_units: Default::default(),
         }
     }
 
@@ -47,29 +46,32 @@ impl Pipeline {
         self.rob.clear();
     }
 
-    fn system_call(&mut self) -> Result<(), SyscallError> {
-        let result: Result<u32, SyscallError> = match self.reg.gpr[consts::SYSCALL_NUM_REG].read() {
+    pub fn system_call(
+        memory: &mut memory::ProcessMemory,
+        reg: &mut register::RegisterFile,
+    ) -> Result<(), SyscallError> {
+        let result: Result<u32, SyscallError> = match reg.gpr[consts::SYSCALL_NUM_REG].read() {
             64 => {
-                let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read() as i32;
-                let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
-                let count = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
-                let bytes = self.memory.read_bytes(buf_addr, count as usize);
+                let fd = reg.gpr[consts::SYSCALL_ARG1_REG].read() as i32;
+                let buf_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                let count = reg.gpr[consts::SYSCALL_ARG3_REG].read();
+                let bytes = memory.read_bytes(buf_addr, count as usize);
 
                 nix::unistd::write(fd, bytes)
                     .map(|n| n as u32)
                     .map_err(|err| SyscallError::Error(format!("{}", err)))
             }
             78 => {
-                let buf_addr = self.reg.gpr[consts::SYSCALL_ARG3_REG].read();
-                let buf_size = self.reg.gpr[consts::SYSCALL_ARG4_REG].read();
-                let path_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
-                let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                let buf_addr = reg.gpr[consts::SYSCALL_ARG3_REG].read();
+                let buf_size = reg.gpr[consts::SYSCALL_ARG4_REG].read();
+                let path_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                let fd = reg.gpr[consts::SYSCALL_ARG1_REG].read();
 
-                let path_addr = self.memory.read_bytes(path_addr, 1).as_ptr() as *const i8;
+                let path_addr = memory.read_bytes(path_addr, 1).as_ptr() as *const i8;
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path_addr) }
                     .to_str()
                     .expect("Can't convert bytes to str");
-                let buf = self.memory.read_bytes_mut(buf_addr, buf_size as usize);
+                let buf = memory.read_bytes_mut(buf_addr, buf_size as usize);
                 nix::fcntl::readlinkat(fd as i32, path_str, buf)
                     .map(|s| s.len() as u32)
                     .map_err(|_| {
@@ -77,18 +79,18 @@ impl Pipeline {
                     })
             }
             80 => {
-                let fd = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
-                let buf_addr = self.reg.gpr[consts::SYSCALL_ARG2_REG].read();
+                let fd = reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                let buf_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let stat = nix::sys::stat::fstat(fd as i32).unwrap();
 
-                self.memory
+                memory
                     .write(buf_addr, stat)
                     .map(|_| 0)
                     .map_err(|s| SyscallError::Error(s))
             }
             160 => {
-                let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
-                self.memory
+                let addr = reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                memory
                     .write(addr, nix::sys::utsname::uname())
                     .map(|_| 0)
                     .map_err(|s| SyscallError::Error(s))
@@ -98,36 +100,42 @@ impl Pipeline {
             176 => Ok(nix::unistd::getgid().as_raw()),
             177 => Ok(nix::unistd::getegid().as_raw()),
             214 => {
-                let addr = self.reg.gpr[consts::SYSCALL_ARG1_REG].read();
-                let max_mem_addr = self.memory.v_address_range.1;
+                let addr = reg.gpr[consts::SYSCALL_ARG1_REG].read();
+                let max_mem_addr = memory.v_address_range.1;
                 if max_mem_addr <= addr {
-                    self.memory
-                        .data
-                        .resize((addr - max_mem_addr + 1) as usize, 0);
-                    self.memory.v_address_range.1 = addr + 1;
+                    memory.data.resize((addr - max_mem_addr + 1) as usize, 0);
+                    memory.v_address_range.1 = addr + 1;
                 }
                 Ok(addr)
             }
             _ => Err(SyscallError::NotImpl),
         };
         result.map(|ret_val| {
-            self.reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
+            reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
             ()
         })
     }
 
-    pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
-        let completed_entries = self.rob.completed_entries();
-        for entry in completed_entries.iter() {
-            entry.retire(&mut self.memory, &mut self.reg);
-        }
+    pub fn commit(&mut self) -> Vec<(usize, ReorderBufferEntry)> {
+        let mut completed_entries = self.rob.completed_entries();
+        let retired_count = completed_entries
+            .iter()
+            .map(|(old_idx, entry)| {
+                let should_cancel = entry.retire(*old_idx, &mut self.memory, &mut self.reg);
+                if should_cancel {
+                    self.clear_all_buffers();
+                }
+                should_cancel
+            })
+            .take_while(|&should_cancel| !should_cancel)
+            .count();
+        completed_entries.truncate(retired_count);
         completed_entries
     }
 
-    fn is_program_finished(&self, retired_entries: &[ReorderBufferEntry]) -> bool {
-        use self::reorder_buffer::MetaData::*;
-        retired_entries.into_iter().any(|rob_entry| {
-            if let Syscall = rob_entry.meta {
+    fn is_program_finished(&self, retired_entries: &[(usize, ReorderBufferEntry)]) -> bool {
+        retired_entries.into_iter().any(|(_, rob_entry)| {
+            if let Function::Ecall = rob_entry.inst.function {
                 if let 93 | 94 = self.reg.gpr[consts::SYSCALL_NUM_REG].read() {
                     return true;
                 }
@@ -156,15 +164,17 @@ impl Pipeline {
         use instruction::{Instruction, Opcode};
 
         // stall
-        let last_rob_entry = self.rob.iter().rev().next();
-        if let Some(entry) = last_rob_entry {
-            let has_to_stall = match entry.inst.function {
-                Ecall => true,
-                Jalr if !entry.is_completed() => true,
-                _ => false,
-            };
-            if has_to_stall {
-                return;
+        {
+            let last_rob_entry = self.rob.iter().rev().next();
+            if let Some(entry) = last_rob_entry {
+                let has_to_stall = match entry.inst.function {
+                    Ecall => true,
+                    Jalr if !entry.is_completed() => true,
+                    _ => false,
+                };
+                if has_to_stall {
+                    return;
+                }
             }
         }
 
@@ -193,9 +203,10 @@ impl Pipeline {
             };
             self.reg.pc.write(npc);
 
+            let inst_rd = inst.fields.rd.unwrap_or(0);
             let rob_idx = self.rob.issue(pc, inst, &self.reg);
             self.rs.issue(rob_idx, &self.rob, &self.reg);
-            self.reg.set_reg_rob_index(inst.fields.rd.unwrap_or(0), rob_idx);
+            self.reg.set_reg_rob_index(inst_rd, rob_idx);
 
             if has_to_stop {
                 break;
@@ -203,16 +214,16 @@ impl Pipeline {
         }
     }
     // return true when process ends.
-    pub fn run_clock(&mut self) -> Vec<ReorderBufferEntry> {
+    pub fn run_clock(&mut self) -> (Vec<(usize, ReorderBufferEntry)>, bool) {
         let retired_insts = self.commit();
         if self.is_program_finished(&retired_insts) {
-            return retired_insts;
+            return (retired_insts, true);
         }
 
         self.write_result();
         self.execute();
         self.issue();
-        retired_insts
+        (retired_insts, false)
     }
 
     // fn fetch(&mut self) {

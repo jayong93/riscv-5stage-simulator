@@ -4,7 +4,6 @@ extern crate riscv_5stage_simulator;
 extern crate structopt;
 extern crate lazy_static;
 
-use riscv_5stage_simulator::consts;
 use riscv_5stage_simulator::memory::ProcessMemory;
 use riscv_5stage_simulator::pipeline::Pipeline;
 use std::fs::File;
@@ -46,24 +45,26 @@ fn main() {
 
     let mut clock_it = 1..;
     loop {
-        //let clock = clock_it.next().unwrap();
-        //let last_reg = pipeline.run_clock();
-        //if OPTS.print_steps && last_reg.inst.value != consts::NOP {
-            //eprint!(
-                //"Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
-                //clock,
-                //last_reg.pc,
-                //last_reg.inst.value,
-                //last_reg.inst.function,
-                //last_reg.inst.fields,
-            //);
-            //if OPTS.print_debug_info {
-                //eprint!(" | regs: {}", pipeline.reg)
-            //}
-            //eprintln!("");
-        //}
-        //if pipeline.is_finished {
-            //break;
-        //}
+        let clock = clock_it.next().unwrap();
+        let (retired_robs, is_finished) = pipeline.run_clock();
+        if OPTS.print_steps {
+            for (_old_index, entry) in retired_robs {
+                eprint!(
+                    "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
+                    clock,
+                    entry.pc,
+                    entry.inst.value,
+                    entry.inst.function,
+                    entry.inst.fields,
+                );
+                if OPTS.print_debug_info {
+                    eprint!(" | regs: {}", pipeline.reg)
+                }
+                eprintln!("");
+            }
+            if is_finished {
+                break;
+            }
+        }
     }
 }

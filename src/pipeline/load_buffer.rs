@@ -67,7 +67,7 @@ impl LoadBuffer {
         let finished: Vec<_> = self
             .buf
             .iter()
-            .filter_map(|(idx, entry)| {
+            .filter_map(|(&idx, entry)| {
                 if let LoadBufferStatus::Finished = entry.status {
                     Some(idx)
                 } else {
@@ -77,7 +77,7 @@ impl LoadBuffer {
             .collect();
         finished
             .into_iter()
-            .map(|idx| self.buf.remove(idx).unwrap())
+            .map(|idx| self.buf.remove(&idx).unwrap())
             .map(|entry| FinishedCalc {
                 rob_idx: entry.rob_index,
                 reg_value: entry.value,
@@ -87,7 +87,7 @@ impl LoadBuffer {
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
         // Amo 연산들은 rs2도 전파되어야 retire
-        for (load_idx, entry) in self.buf.iter_mut() {
+        for (_, entry) in self.buf.iter_mut() {
             if let Operand::Rob(index) = entry.base {
                 if index == job.rob_idx {
                     entry.base = Operand::Value(job.reg_value);
