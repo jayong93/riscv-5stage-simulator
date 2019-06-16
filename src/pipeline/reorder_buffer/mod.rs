@@ -4,81 +4,17 @@ use super::operand::Operand;
 use instruction::{Instruction, Opcode};
 
 #[derive(Debug, Clone)]
-pub enum MetaData {
-    Branch {
-        pred_taken: bool,
-        is_taken: bool,
-    },
-    Store(Operand, bool),
-    Syscall,
-    Normal(u8),
-    Amo {
-        dest: u8,
-        addr: Operand,
-        source: Operand,
-    },
-}
 
-impl Default for MetaData {
-    fn default() -> Self {
-        MetaData::Normal(0)
-    }
-}
 
 #[derive(Debug, Default, Clone)]
 pub struct ReorderBufferEntry {
     pub pc: u32,
     pub inst: Instruction,
-    pub meta: MetaData,
-    pub value: u32,
-    pub is_ready: bool,
-}
-
-impl ReorderBufferEntry {
-    pub fn new(pc: u32, inst: Instruction) -> Self {
-        // TODO: Amo 명령어 처리
-        use instruction::Function;
-        use instruction::Opcode::*;
-
-        let (meta, is_ready) = match inst.opcode {
-            Branch => (
-                MetaData::Branch {
-                    pred_taken: false,
-                    is_taken: false,
-                },
-                false,
-            ),
-            Store => (MetaData::Store(Operand::Value(0), false), false),
-            System if inst.function == Function::Ecall => (MetaData::Syscall, true),
-            Amo => {
-                (MetaData::Amo {
-                    dest: inst.fields.rd.unwrap(),
-                    source: Operand::Value(0),
-                    addr: Operand::Value(0),
-                }, true)
-            }
-            _ => (
-                MetaData::Normal(inst.fields.rd.unwrap_or(0)),
-                if let Function::Jal = inst.function {
-                    true
-                } else {
-                    false
-                },
-            ),
-        };
-        let value = match inst.opcode {
-            Jal | Jalr => pc + crate::consts::WORD_SIZE as u32,
-            Branch => pc + inst.fields.imm.unwrap(),
-            _ => 0,
-        };
-        ReorderBufferEntry {
-            pc,
-            inst,
-            meta,
-            value,
-            is_ready,
-        }
-    }
+    pub mem_value: Operand,
+    pub reg_value: u32,
+    pub is_completed: bool,
+    pub rd: u8,
+    pub addr: Operand,
 }
 
 #[derive(Debug)]
@@ -102,42 +38,6 @@ impl ReorderBuffer {
     pub fn clear(&mut self) {
         self.head = 0;
         self.tail = 0;
-    }
-
-    pub fn retire(
-        &mut self,
-        func_unit: &mut FunctionalUnits,
-        mem: &mut crate::memory::ProcessMemory,
-    ) -> Vec<ReorderBufferEntry> {
-        let mut retired_entries = Vec::new();
-        let entries_it: Vec<_> = (0..self.len()).map(|i| self.to_index(i).unwrap()).collect();
-        for idx in entries_it {
-            let entry = self.get_mut(idx).unwrap();
-            if !entry.is_ready {
-                break;
-            }
-            let can_retire = match entry.meta {
-                MetaData::Store(Operand::Value(addr), true) => {
-                    if func_unit
-                        .execute_store(entry.inst.function, idx, addr, entry.value, mem)
-                        .is_some()
-                    {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                MetaData::Store(_, _) => unreachable!(),
-                _ => true,
-            };
-
-            if !can_retire {
-                break;
-            }
-            retired_entries.push(entry.clone());
-        }
-        self.head = (self.head + retired_entries.len()) % self.buf.len();
-        retired_entries
     }
 
     fn get_op_for_store(
@@ -202,18 +102,16 @@ impl ReorderBuffer {
             }
         }
 
-        let mut new_entry = ReorderBufferEntry::new(pc, inst.clone());
+        let (mem_value, addr) = match inst.opcode {
+            Store => (reg.) 
+        };
+        let mut new_entry = ReorderBufferEntry{
+            pc,
+            inst,
+            value: 0,
+            is_completed: false,
 
-        if inst.opcode == Opcode::Store {
-            let (op1, op2) = self.get_op_for_store(&inst, reg);
-            if let Operand::Value(val) = op2 {
-                new_entry.value = val;
-                new_entry.meta = MetaData::Store(op1, true);
-            } else if let Operand::Rob(idx) = op2 {
-                new_entry.value = idx as u32;
-                new_entry.meta = MetaData::Store(op1, false);
-            }
-        }
+        };
 
         self.buf[self.tail] = new_entry;
         let rob_index = self.tail;

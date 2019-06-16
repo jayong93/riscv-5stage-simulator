@@ -117,48 +117,11 @@ impl Pipeline {
     }
 
     pub fn commit(&mut self) -> Vec<ReorderBufferEntry> {
-        use self::operand::Operand;
-        use self::reorder_buffer::MetaData::*;
-        let retired_entries = self.rob.retire(&mut self.func_units, &mut self.memory);
-
-        for entry in retired_entries.iter() {
-            match entry.meta {
-                Branch {
-                    pred_taken: pred,
-                    is_taken: real,
-                } => {
-                    if pred != real {
-                        self.clear_all_buffers();
-                        if real {
-                            self.reg.pc.write(entry.value);
-                        } else {
-                            self.reg
-                                .pc
-                                .write(entry.pc + crate::consts::WORD_SIZE as u32);
-                        }
-                    }
-                }
-                Normal(reg) => {
-                    self.reg.gpr[reg as usize].write(entry.value);
-                }
-                Syscall => {
-                    self.system_call().unwrap_or_else(|e| {
-                        if let SyscallError::Error(s) = e {
-                            panic!("{}, in {}, registers: {}", s, entry.pc, self.reg)
-                        } else {
-                            panic!(
-                                "(in {})system call #{} is not implemented yet",
-                                entry.pc,
-                                self.reg.gpr[consts::SYSCALL_NUM_REG].read()
-                            )
-                        }
-                    });
-                }
-                _ => {}
-            }
+        let completed_entries = self.rob.completed_entries();
+        for entry in completed_entries.iter() {
+            entry.retire(&mut self.memory, &mut self.reg);
         }
-
-        retired_entries
+        completed_entries
     }
 
     fn is_program_finished(&self, retired_entries: &[ReorderBufferEntry]) -> bool {
@@ -173,113 +136,53 @@ impl Pipeline {
         })
     }
 
-    pub fn process_rs_entry(&mut self, entry: self::reservation_staion::RSEntry) {
-        use self::reorder_buffer::MetaData;
-        let is_ready;
-        {
-            let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
-            is_ready = rob_entry.is_ready;
-            if entry.inst.function == Function::Jalr {
-                self.reg.pc.write(entry.value);
-            } else if let MetaData::Branch {
-                pred_taken: pred,
-                is_taken: _,
-            } = rob_entry.meta
-            {
-                // branch의 결과값은 meta에 쓴다.
-                rob_entry.meta = MetaData::Branch {
-                    is_taken: if entry.value == 0 { false } else { true },
-                    pred_taken: pred,
-                };
-            } else if !rob_entry.is_ready {
-                self.lb.propagate(entry.rob_index, entry.value);
-                self.rs.propagate(entry.rob_index, entry.value);
-                rob_entry.value = entry.value;
-            }
-            rob_entry.is_ready = true;
-        }
-        if is_ready {
-            self.rob.propagate(entry.rob_index, entry.value);
-        }
-    }
-
-    pub fn process_lb_entry(&mut self, entry: self::load_buffer::LoadBufferEntry) {
-        self.rob.propagate(entry.rob_index, entry.value);
-
-        let rob_entry = self.rob.get_mut(entry.rob_index).unwrap();
-        self.lb.propagate(entry.rob_index, entry.value);
-        self.rs.propagate(entry.rob_index, entry.value);
-        rob_entry.value = entry.value;
-        rob_entry.is_ready = true;
-    }
-
     pub fn write_result(&mut self) {
-        let finished_rs_entries = self.rs.pop_finished();
-        let finished_lb_entries = self.lb.pop_finished();
-        for entry in finished_rs_entries {
-            self.process_rs_entry(entry);
-        }
-        for entry in finished_lb_entries {
-            self.process_lb_entry(entry);
+        let completed_entries = self.rs.completed_entries();
+        for entry in completed_entries {
+            rs.propagate(entry);
         }
     }
 
     pub fn execute(&mut self) {
-        self.rs.execute(&self.rob, &mut self.func_units);
-        self.lb
-            .execute(&self.rob, &mut self.func_units, &self.memory);
+        self.rs.execute(&mut self.rob);
     }
 
     pub fn issue(&mut self) {
-        use self::Opcode::*;
-        // if a last instruction in ROB is either Jalr or Ecall,
-        // stop fetching until the instruction is ready to commit.
-        let has_to_stall = self
-            .rob
-            .iter()
-            .rev()
-            .next()
-            .and_then(|entry| match entry.inst.function {
-                Function::Jalr if !entry.is_ready => Some(()),
-                Function::Ecall => Some(()),
-                _ if entry.inst.opcode == Opcode::Amo => Some(()),
-                _ => None,
-            })
-            .is_some();
-        if has_to_stall {
-            return;
+        use instruction::Function::*;
+        use instruction::{Instruction, Opcode};
+
+        // stall
+        let last_rob_entry = self.rob.iter().rev().next();
+        if let Some(entry) = last_rob_entry {
+            let has_to_stall = match entry.function {
+                Ecall => true,
+                Jalr if !entry.is_complete() => true,
+                _ => false,
+            };
+            if has_to_stall {
+                return;
+            }
         }
 
-        let mut pc = self.reg.pc.read();
-        let insts: Vec<_> = (0..2)
-            .map(|_| {
-                let raw_inst = self.memory.read_inst(pc);
-                let old_pc = pc;
-                pc += consts::WORD_SIZE as u32;
-                let mut inst = Instruction::new(raw_inst);
-
-                if let Fnmadd | Fnmsub | Fmadd | Fmsub | OpFp | LoadFp | StoreFp = inst.opcode {
-                    inst = Instruction::default();
-                }
-                
-                (old_pc, inst)
-            })
-            .collect();
-        self.reg.pc.write(pc);
-
-        for (pc, inst) in insts {
-            let rob_index = self.rob.issue(pc, inst.clone(), &self.reg);
-            if inst.opcode == crate::instruction::Opcode::Load {
-                self.lb.issue(rob_index, &self.rob, &self.reg);
-            } else {
-                self.rs.issue(rob_index, &self.rob, &self.reg);
+        for _ in 0..2 {
+            let pc = self.reg.pc.read();
+            let raw_inst = self.memory.read_inst(pc);
+            let mut inst = Instruction::new(raw_inst);
+            if let Opcode::Fmadd | Opcode::Fmsub | Opcode::Fnmadd | Opcode::Fnmsub | Opcode::OpFp | Opcode::StoreFp | Opcode::LoadFp = inst.opcode {
+                inst = Instruction::default();
             }
 
-            // if jal instruction has issued, stop fetching and change pc
-            if let Opcode::Jal = inst.opcode {
-                self.reg.pc.write(pc + inst.fields.imm.unwrap());
-                break;
-            }
+            let (npc, has_to_stop) = match inst.opcode {
+                Opcode::Jal => (pc + inst.fields.imm.unwrap(), true),
+                Opcode::Jalr => (pc, true),
+                Opcode::Ecall => (pc+consts::WORD_SIZE, true),
+                _ => (pc+consts::WORD_SIZE, false),
+            };
+            self.reg.pc.write(npc);
+
+            self.rob.issue(pc, inst, &self.reg);
+
+            if has_to_stop {break;}
         }
     }
     // return true when process ends.
