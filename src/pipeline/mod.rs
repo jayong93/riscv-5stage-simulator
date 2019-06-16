@@ -137,14 +137,18 @@ impl Pipeline {
     }
 
     pub fn write_result(&mut self) {
-        let completed_entries = self.rs.completed_entries();
+        let completed_entries = self.rs.completed_jobs();
         for entry in completed_entries {
-            rs.propagate(entry);
+            self.rs.propagate(&entry);
+            self.rob.propagate(&entry);
         }
     }
 
     pub fn execute(&mut self) {
-        self.rs.execute(&mut self.rob);
+        let npc = self.rs.execute(&mut self.rob, &mut self.memory);
+        if let Some(npc) = npc {
+            self.reg.pc.write(npc);
+        }
     }
 
     pub fn issue(&mut self) {
@@ -154,9 +158,9 @@ impl Pipeline {
         // stall
         let last_rob_entry = self.rob.iter().rev().next();
         if let Some(entry) = last_rob_entry {
-            let has_to_stall = match entry.function {
+            let has_to_stall = match entry.inst.function {
                 Ecall => true,
-                Jalr if !entry.is_complete() => true,
+                Jalr if !entry.is_completed() => true,
                 _ => false,
             };
             if has_to_stall {
@@ -168,21 +172,34 @@ impl Pipeline {
             let pc = self.reg.pc.read();
             let raw_inst = self.memory.read_inst(pc);
             let mut inst = Instruction::new(raw_inst);
-            if let Opcode::Fmadd | Opcode::Fmsub | Opcode::Fnmadd | Opcode::Fnmsub | Opcode::OpFp | Opcode::StoreFp | Opcode::LoadFp = inst.opcode {
+            if let Opcode::Fmadd
+            | Opcode::Fmsub
+            | Opcode::Fnmadd
+            | Opcode::Fnmsub
+            | Opcode::OpFp
+            | Opcode::StoreFp
+            | Opcode::LoadFp = inst.opcode
+            {
                 inst = Instruction::default();
             }
 
             let (npc, has_to_stop) = match inst.opcode {
                 Opcode::Jal => (pc + inst.fields.imm.unwrap(), true),
                 Opcode::Jalr => (pc, true),
-                Opcode::Ecall => (pc+consts::WORD_SIZE, true),
-                _ => (pc+consts::WORD_SIZE, false),
+                Opcode::System if inst.function == Function::Ecall => {
+                    (pc + consts::WORD_SIZE as u32, true)
+                }
+                _ => (pc + consts::WORD_SIZE as u32, false),
             };
             self.reg.pc.write(npc);
 
-            self.rob.issue(pc, inst, &self.reg);
+            let rob_idx = self.rob.issue(pc, inst, &self.reg);
+            self.rs.issue(rob_idx, &self.rob, &self.reg);
+            self.reg.set_reg_rob_index(inst.fields.rd.unwrap_or(0), rob_idx);
 
-            if has_to_stop {break;}
+            if has_to_stop {
+                break;
+            }
         }
     }
     // return true when process ends.

@@ -1,6 +1,9 @@
 //! 32-bit register and RV32I register file.
 
 use std::fmt;
+use pipeline::operand::Operand;
+
+type RegisterStat = Option<usize>;
 
 /// A complete RV32I register file.
 ///
@@ -9,7 +12,7 @@ use std::fmt;
 pub struct RegisterFile {
     pub pc: Register,
     pub gpr: [Register; 32],
-    pub fpr: [Register; 32],
+    pub related_rob: [RegisterStat; 32],
 }
 
 impl fmt::Display for RegisterFile {
@@ -28,12 +31,21 @@ impl RegisterFile {
         let mut reg_file = RegisterFile {
             pc: Register::new(pc, true),
             gpr: [Register::new(0, true); 32],
-            fpr: [Register::new(0, true); 32],
+            related_rob: [None; 32],
         };
         reg_file.gpr[0] = Register::new(0, false); // reinit x0 as read-only
         reg_file.gpr[2] = Register::new(stack_pointer, true);
 
         reg_file
+    }
+
+    pub fn get_reg_value(&self, reg: u8) -> Operand {
+        self.related_rob[reg as usize].map(|idx| Operand::Rob(idx)).unwrap_or(Operand::Value(self.gpr[reg as usize].read()))
+    }
+    
+    pub fn set_reg_rob_index(&mut self, reg: u8, rob_idx: usize) {
+        if reg == 0 {return;}
+        self.related_rob[reg as usize] = Some(rob_idx);
     }
 }
 

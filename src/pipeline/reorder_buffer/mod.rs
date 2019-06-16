@@ -1,20 +1,45 @@
 pub mod iter;
-use super::functional_units::FunctionalUnits;
 use super::operand::Operand;
 use instruction::{Instruction, Opcode};
-
-#[derive(Debug, Clone)]
-
+use pipeline::reservation_staion::FinishedCalc;
 
 #[derive(Debug, Default, Clone)]
 pub struct ReorderBufferEntry {
     pub pc: u32,
     pub inst: Instruction,
     pub mem_value: Operand,
-    pub reg_value: u32,
-    pub is_completed: bool,
+    pub reg_value: Option<u32>,
     pub rd: u8,
     pub addr: Operand,
+    pub branch_pred: bool,
+    pub mem_rem_cycle: usize,
+}
+
+impl ReorderBufferEntry {
+    pub fn is_completed(&self) -> bool {
+        let mem_val_done = if let Operand::Value(_) = self.mem_value {
+            true
+        } else {
+            false
+        };
+        let addr_done = if let Operand::Value(addr) = self.addr {
+            if addr == 0 {
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+        let reg_val_done = self.reg_value.is_some();
+
+        match self.inst.opcode {
+            Opcode::Store => mem_val_done && addr_done && self.mem_rem_cycle == 0,
+            Opcode::Amo => mem_val_done && addr_done && reg_val_done && self.mem_rem_cycle == 0,
+            Opcode::Jalr => addr_done && reg_val_done,
+            _ => reg_val_done,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -40,53 +65,6 @@ impl ReorderBuffer {
         self.tail = 0;
     }
 
-    fn get_op_for_store(
-        &self,
-        inst: &Instruction,
-        reg: &crate::register::RegisterFile,
-    ) -> (Operand, Operand) {
-        let (reg1, reg2) = (
-            inst.fields.rs1.unwrap() as usize,
-            inst.fields.rs2.unwrap() as usize,
-        );
-        let (mut op1, mut op2) = (None, None);
-
-        for (idx, entry) in self
-            .iter()
-            .enumerate()
-            .rev()
-            .map(|(rel_pos, entry)| (self.to_index(rel_pos).unwrap(), entry))
-        {
-            if let MetaData::Normal(target_reg) = entry.meta {
-                if target_reg as usize == reg1 {
-                    op1 = Some(idx);
-                } else if target_reg as usize == reg2 {
-                    op2 = Some(idx);
-                }
-            }
-
-            if let (Some(_), Some(_)) = (op1, op2) {
-                break;
-            }
-        }
-
-        let idx_to_op = |idx| {
-            let entry = self.get(idx).unwrap();
-            if entry.is_ready {
-                Operand::Value(entry.value)
-            } else {
-                Operand::Rob(idx)
-            }
-        };
-        let op1 = op1
-            .map(idx_to_op)
-            .unwrap_or_else(|| Operand::Value(reg.gpr[reg1].read()));
-        let op2 = op2
-            .map(idx_to_op)
-            .unwrap_or_else(|| Operand::Value(reg.gpr[reg2].read()));
-        (op1, op2)
-    }
-
     pub fn issue(
         &mut self,
         pc: u32,
@@ -103,14 +81,32 @@ impl ReorderBuffer {
         }
 
         let (mem_value, addr) = match inst.opcode {
-            Store => (reg.) 
+            Opcode::Store => (
+                reg.get_reg_value(inst.fields.rs2.unwrap()),
+                Operand::default(),
+            ),
+            Opcode::Amo => (
+                reg.get_reg_value(inst.fields.rs2.unwrap()),
+                reg.get_reg_value(inst.fields.rs1.unwrap()),
+            ),
+            _ => (Operand::default(), Operand::default()),
         };
-        let mut new_entry = ReorderBufferEntry{
+        let reg_value = match inst.opcode {
+            Opcode::Jal | Opcode::Jalr => Some(pc + crate::consts::WORD_SIZE as u32),
+            Opcode::Lui => Some(inst.fields.imm.unwrap()),
+            Opcode::AuiPc => Some(pc + inst.fields.imm.unwrap()),
+            _ => None,
+        };
+        let rd = inst.fields.rd.unwrap_or(0);
+        let mut new_entry = ReorderBufferEntry {
             pc,
             inst,
-            value: 0,
-            is_completed: false,
-
+            reg_value: None,
+            mem_value,
+            rd,
+            addr,
+            branch_pred: false,
+            mem_rem_cycle: crate::consts::MEM_CYCLE,
         };
 
         self.buf[self.tail] = new_entry;
@@ -172,33 +168,7 @@ impl ReorderBuffer {
         }
     }
 
-    pub fn propagate(&mut self, rob_idx: usize, value: u32) {
-        for idx in self
-            .iter()
-            .enumerate()
-            .map(|(i, _)| self.to_index(i).unwrap())
-            .collect::<Vec<_>>()
-        {
-            let entry = self.get_mut(idx).unwrap();
-            match entry.meta {
-                MetaData::Store(op1, has_value) => {
-                    let mut new_op1 = op1;
-                    if let Operand::Rob(base_idx) = op1 {
-                        if base_idx == rob_idx {
-                            new_op1 = Operand::Value(entry.inst.fields.imm.unwrap() + value);
-                        }
-                    }
-
-                    let new_has_val = if !has_value && entry.value as usize == rob_idx {
-                        entry.value = value;
-                        true
-                    } else {
-                        false
-                    };
-                    entry.meta = MetaData::Store(new_op1, new_has_val);
-                }
-                _ => {}
-            }
-        }
+    pub fn propagate(&mut self, job: &FinishedCalc) {
+        unimplemented!()
     }
 }

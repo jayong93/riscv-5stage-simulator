@@ -41,3 +41,8 @@ pub const SYSCALL_ARG3_REG: usize = 12;
 pub const SYSCALL_ARG4_REG: usize = 13;
 pub const SYSCALL_ARG5_REG: usize = 14;
 pub const SYSCALL_ARG6_REG: usize = 15;
+
+pub const MEM_CYCLE: usize = 10;
+pub const ADD_CYCLE: usize = 1;
+pub const MUL_CYCLE: usize = 4;
+pub const DIV_CYCLE: usize = 8;

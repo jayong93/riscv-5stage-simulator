@@ -4,3 +4,9 @@ pub enum Operand {
     Rob(usize),
 }
 
+
+impl Default for Operand {
+    fn default() -> Self {
+        Operand::Value(0)
+    }
+}
