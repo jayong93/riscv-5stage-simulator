@@ -111,6 +111,7 @@ impl Pipeline {
                 }
                 Ok(addr)
             }
+            93 | 94 => Ok(0),
             _ => Err(SyscallError::NotImpl(
                 reg.gpr[crate::consts::SYSCALL_NUM_REG].read(),
             )),
