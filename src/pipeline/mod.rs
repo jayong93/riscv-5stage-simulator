@@ -26,6 +26,7 @@ pub struct Pipeline {
     pub memory: memory::ProcessMemory,
     pub rob: reorder_buffer::ReorderBuffer,
     pub rs: reservation_staion::ReservationStation,
+    clock: usize,
 }
 
 impl Pipeline {
@@ -35,13 +36,17 @@ impl Pipeline {
             memory,
             rob: Default::default(),
             rs: Default::default(),
+            clock: 0,
         }
     }
 
     fn clear_all_buffers(&mut self) {
         self.rs.clear();
         self.rob.clear();
-        self.reg.related_rob.iter_mut().for_each(|stat| *stat = None);
+        self.reg
+            .related_rob
+            .iter_mut()
+            .for_each(|stat| *stat = None);
     }
 
     pub fn system_call(
@@ -106,7 +111,9 @@ impl Pipeline {
                 }
                 Ok(addr)
             }
-            _ => Err(SyscallError::NotImpl(reg.gpr[crate::consts::SYSCALL_NUM_REG].read())),
+            _ => Err(SyscallError::NotImpl(
+                reg.gpr[crate::consts::SYSCALL_NUM_REG].read(),
+            )),
         };
         result.map(|ret_val| {
             reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
@@ -121,13 +128,27 @@ impl Pipeline {
             .iter()
             .map(|(old_idx, entry)| {
                 let should_cancel = entry.retire(*old_idx, &mut self.memory, &mut self.reg);
+                if unsafe{crate::PRINT_STEPS} {
+                    eprint!(
+                        "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
+                        self.clock, entry.pc, entry.inst.value, entry.inst.function, entry.inst.fields,
+                    );
+                    if unsafe{crate::PRINT_DEBUG_INFO} {
+                        eprint!(" | regs: {}", self.reg);
+                    }
+                    eprintln!("");
+                }
                 if should_cancel {
                     self.clear_all_buffers();
                     if let (Opcode::Branch, Some(is_taken)) = (entry.inst.opcode, entry.reg_value) {
                         if is_taken == 1 {
-                            self.reg.pc.write(entry.pc.wrapping_add(entry.inst.fields.imm.unwrap()));
+                            self.reg
+                                .pc
+                                .write(entry.pc.wrapping_add(entry.inst.fields.imm.unwrap()));
                         } else {
-                            self.reg.pc.write(entry.pc.wrapping_add(crate::consts::WORD_SIZE as u32));
+                            self.reg
+                                .pc
+                                .write(entry.pc.wrapping_add(crate::consts::WORD_SIZE as u32));
                         }
                     }
                 }
@@ -136,7 +157,7 @@ impl Pipeline {
             .take_while(|&should_cancel| !should_cancel)
             .count();
         let total_len = completed_entries.len();
-        completed_entries.truncate(std::cmp::min(retired_count+1, total_len));
+        completed_entries.truncate(std::cmp::min(retired_count + 1, total_len));
         completed_entries
     }
 
@@ -222,6 +243,7 @@ impl Pipeline {
     }
     // return true when process ends.
     pub fn run_clock(&mut self) -> (Vec<(usize, ReorderBufferEntry)>, bool) {
+        self.clock += 1;
         let retired_insts = self.commit();
         if self.is_program_finished(&retired_insts) {
             return (retired_insts, true);

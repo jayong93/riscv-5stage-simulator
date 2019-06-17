@@ -31,6 +31,7 @@ lazy_static! {
 
 fn main() {
     unsafe{ riscv_5stage_simulator::PRINT_DEBUG_INFO = OPTS.print_debug_info };
+    unsafe{ riscv_5stage_simulator::PRINT_STEPS = OPTS.print_steps };
 
     let mut f_data = Vec::new();
     let process_image;
@@ -43,28 +44,10 @@ fn main() {
 
     let mut pipeline = Pipeline::new(elf.entry as u32, process_image);
 
-    let mut clock_it = 1..;
     loop {
-        let clock = clock_it.next().unwrap();
-        let (retired_robs, is_finished) = pipeline.run_clock();
-        if OPTS.print_steps {
-            for (_old_index, entry) in retired_robs {
-                eprint!(
-                    "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
-                    clock,
-                    entry.pc,
-                    entry.inst.value,
-                    entry.inst.function,
-                    entry.inst.fields,
-                );
-                if OPTS.print_debug_info {
-                    eprint!(" | regs: {}", pipeline.reg)
-                }
-                eprintln!("");
-            }
-            if is_finished {
-                break;
-            }
+        let (_, is_finished) = pipeline.run_clock();
+        if is_finished {
+            break;
         }
     }
 }
