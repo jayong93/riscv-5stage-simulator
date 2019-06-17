@@ -47,6 +47,7 @@ fn main() {
     loop {
         let (_, is_finished) = pipeline.run_clock();
         if is_finished {
+            eprintln!("Total Clock: {}", pipeline.clock);
             break;
         }
     }

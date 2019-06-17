@@ -26,7 +26,7 @@ pub struct Pipeline {
     pub memory: memory::ProcessMemory,
     pub rob: reorder_buffer::ReorderBuffer,
     pub rs: reservation_staion::ReservationStation,
-    clock: usize,
+    pub clock: usize,
 }
 
 impl Pipeline {
