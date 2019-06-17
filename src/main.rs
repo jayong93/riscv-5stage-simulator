@@ -63,6 +63,7 @@ fn main() {
             eprintln!("");
         }
         if pipeline.is_finished {
+            eprintln!("Total Clock: {}", clock);
             break;
         }
     }
