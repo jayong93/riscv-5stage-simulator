@@ -1,4 +1,4 @@
-use instruction::Function;
+use instruction::{Opcode, Function};
 use memory::ProcessMemory;
 use pipeline::exception::Exception;
 use pipeline::operand::Operand;
@@ -9,6 +9,12 @@ pub struct MemoryUnit();
 impl MemoryUnit {
     pub fn execute_store(store_entry: &mut ReorderBufferEntry, mem: &mut ProcessMemory) {
         use self::Function::*;
+        if let Opcode::Amo = store_entry.inst.opcode {
+            if store_entry.reg_value.is_none() {
+                return;
+            }
+        }
+
         if let (Operand::Value(addr), Operand::Value(value)) =
             (store_entry.addr, store_entry.mem_value)
         {
