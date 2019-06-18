@@ -103,6 +103,7 @@ impl std::fmt::Display for ReorderBuffer {
 
 impl ReorderBuffer {
     pub fn clear(&mut self) {
+        self.highst_index = 0;
         self.unused_indies.clear();
         self.index_map.clear();
         self.index_queue.clear();

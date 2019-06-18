@@ -19,19 +19,7 @@ pub enum LoadBufferStatus {
 pub struct LoadBufferEntry {
     pub rob_index: usize,
     pub status: LoadBufferStatus,
-    pub base: Operand,
-    pub addr: u32, // initially has imm value.
     pub value: Result<u32, Exception>,
-}
-
-impl LoadBufferEntry {
-    pub fn can_run(&self) -> bool {
-        if let Operand::Value(_) = self.base {
-            true
-        } else {
-            false
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -54,8 +42,6 @@ impl LoadBuffer {
                     LoadBufferEntry {
                         rob_index,
                         status: LoadBufferStatus::Wait,
-                        base: reg.get_reg_value(inst.fields.rs1.unwrap(), rob),
-                        addr: inst.fields.imm.unwrap_or(0),
                         value: Ok(0),
                     },
                 );
@@ -94,7 +80,10 @@ impl LoadBuffer {
         }
 
         let rob_entry = rob.get(load.rob_index).unwrap();
-        if let Operand::None | Operand::Rob(_) = rob_entry.addr {
+        let mut my_addr = 0;
+        if let Operand::Value(target_addr) = rob_entry.addr {
+            my_addr = target_addr;
+        } else {
             return false;
         }
 
@@ -112,7 +101,7 @@ impl LoadBuffer {
                 Opcode::Store | Opcode::Amo if entry.inst.function != Function::Lrw => {
                     match entry.addr {
                         Operand::Rob(_) => true,
-                        Operand::Value(addr) if addr == load.addr => true,
+                        Operand::Value(addr) if addr == my_addr => true,
                         _ => false,
                     }
                 }
