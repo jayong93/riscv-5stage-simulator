@@ -194,10 +194,6 @@ impl ProcessMemory {
             buf = &self.stack;
             (addr - self.stack_range.0) as usize
         };
-        if unsafe { crate::PRINT_DEBUG_INFO } {
-            eprintln!("DEBUG: Load has occured in {:x}.", addr);
-            eprintln!("DEBUG: val: {:?}", &buf[offset..offset + size]);
-        }
         Ok(&buf[offset..offset + size])
     }
 
