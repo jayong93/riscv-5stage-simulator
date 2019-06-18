@@ -1,15 +1,13 @@
 use instruction::Function;
 use memory::ProcessMemory;
+use pipeline::exception::Exception;
 use pipeline::operand::Operand;
 use pipeline::reorder_buffer::ReorderBufferEntry;
 
 pub struct MemoryUnit();
 
 impl MemoryUnit {
-    pub fn execute_store(
-        store_entry: &mut ReorderBufferEntry,
-        mem: &mut ProcessMemory,
-    ) {
+    pub fn execute_store(store_entry: &mut ReorderBufferEntry, mem: &mut ProcessMemory) {
         use self::Function::*;
         if let (Operand::Value(addr), Operand::Value(value)) =
             (store_entry.addr, store_entry.mem_value)
@@ -24,17 +22,21 @@ impl MemoryUnit {
         }
     }
 
-    pub fn execute(addr: u32, load_entry: &mut ReorderBufferEntry, mem: &ProcessMemory) -> u32 {
+    pub fn execute(
+        addr: u32,
+        load_entry: &mut ReorderBufferEntry,
+        mem: &ProcessMemory,
+    ) -> Result<u32, Exception> {
         use self::Function::*;
         // Store 확인은 Load Buffer에서 할 일 이므로 여기선 처리 안해도 됨.
         let value = match load_entry.inst.function {
-            Lb => mem.read::<i8>(addr) as u32,
-            Lbu => mem.read::<u8>(addr) as u32,
-            Lh => mem.read::<i16>(addr) as u32,
-            Lhu => mem.read::<u16>(addr) as u32,
+            Lb => mem.read::<i8>(addr).map(|val| val as u32),
+            Lbu => mem.read::<u8>(addr).map(|val| val as u32),
+            Lh => mem.read::<i16>(addr).map(|val| val as u32),
+            Lhu => mem.read::<u16>(addr).map(|val| val as u32),
             Lw => mem.read::<u32>(addr),
             _ => {
-                let value = mem.read::<u32>(addr);
+                let value = mem.read::<u32>(addr)?;
                 let value_to_calc = if let Operand::Value(val) = load_entry.mem_value {
                     val
                 } else {
@@ -60,7 +62,7 @@ impl MemoryUnit {
                     _ => unreachable!(),
                 };
                 load_entry.mem_value = Operand::Value(mem_val);
-                value
+                Ok(value)
             }
         };
         value

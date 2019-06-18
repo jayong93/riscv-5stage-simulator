@@ -2,6 +2,7 @@
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use goblin::elf32::program_header::ProgramHeader as Elf32ProgramHeader;
+use pipeline::exception::Exception;
 use std::mem::size_of;
 
 mod consts;
@@ -146,41 +147,44 @@ impl ProcessMemory {
         sp
     }
 
-    fn check_address_space(&self, addr: u32) -> Result<(), String> {
+    fn check_address_space(&self, addr: u32) -> Result<(), Exception> {
         if addr < self.v_address_range.0
             || (addr >= self.v_address_range.1 && addr < self.stack_range.0)
         {
-            Err(format!("{:x} is out of address range.", addr))
+            Err(Exception::WritingToInvalidMemory(addr))
         } else {
             Ok(())
         }
     }
 
-    fn check_write_address_space(&self, addr: u32) -> Result<(), String> {
+    fn check_write_address_space(&self, addr: u32) -> Result<(), Exception> {
         if self.read_only_range.0 <= addr && addr < self.read_only_range.1 {
-            Err(format!("{:x} is out of writable address range.", addr))
+            Err(Exception::WritingToReadOnlyMemory(addr))
         } else {
             Ok(())
         }
     }
 
-    pub fn read_inst(&self, addr: u32) -> u32 {
-        self.check_address_space(addr).unwrap();
+    pub fn read_inst(&self, addr: u32) -> Result<u32, Exception> {
+        self.check_address_space(addr)?;
 
         let offset = (addr - self.v_address_range.0) as usize;
         let mut data = &(self.data[offset..offset + 4]);
-        data.read_u32::<LittleEndian>()
-            .expect("Can't read memory as u32 instruction")
+        Ok(data
+            .read_u32::<LittleEndian>()
+            .expect("Can't read memory as u32 instruction"))
     }
 
-    pub fn read<T: Copy>(&self, addr: u32) -> T {
+    pub fn read<T: Copy>(&self, addr: u32) -> Result<T, Exception> {
         let data_size = size_of::<T>() as usize;
-        let data_ptr = self.read_bytes(addr, data_size).as_ptr() as *const T;
-        unsafe { *data_ptr }
+        let data_ptr = self
+            .read_bytes(addr, data_size)
+            .map(|val| unsafe { *(val.as_ptr() as *const T) });
+        data_ptr
     }
 
-    pub fn read_bytes(&self, addr: u32, size: usize) -> &[u8] {
-        self.check_address_space(addr).unwrap();
+    pub fn read_bytes(&self, addr: u32, size: usize) -> Result<&[u8], Exception> {
+        self.check_address_space(addr)?;
 
         let buf;
         let offset = if addr < self.stack_range.0 {
@@ -192,13 +196,13 @@ impl ProcessMemory {
         };
         if unsafe { crate::PRINT_DEBUG_INFO } {
             eprintln!("DEBUG: Load has occured in {:x}.", addr);
-            eprintln!("DEBUG: val: {:?}", &buf[offset..offset+size]);
+            eprintln!("DEBUG: val: {:?}", &buf[offset..offset + size]);
         }
-        &buf[offset..offset + size]
+        Ok(&buf[offset..offset + size])
     }
 
-    pub fn read_bytes_mut(&mut self, addr: u32, size: usize) -> &mut [u8] {
-        self.check_address_space(addr).unwrap();
+    pub fn read_bytes_mut(&mut self, addr: u32, size: usize) -> Result<&mut [u8], Exception> {
+        self.check_address_space(addr)?;
 
         let buf;
         let offset = if addr < self.stack_range.0 {
@@ -208,17 +212,17 @@ impl ProcessMemory {
             buf = &mut self.stack;
             (addr - self.stack_range.0) as usize
         };
-        &mut buf[offset..offset + size]
+        Ok(&mut buf[offset..offset + size])
     }
 
-    pub fn write<T>(&mut self, addr: u32, value: T) -> Result<(), String> {
+    pub fn write<T>(&mut self, addr: u32, value: T) -> Result<(), Exception> {
         let data_size = size_of::<T>() as usize;
         let ptr = &value as *const T as *const u8;
         let byte_slice = unsafe { std::slice::from_raw_parts(ptr, data_size) };
         self.write_slice(addr, byte_slice)
     }
 
-    pub fn write_slice<T>(&mut self, addr: u32, value: &[T]) -> Result<(), String> {
+    pub fn write_slice<T>(&mut self, addr: u32, value: &[T]) -> Result<(), Exception> {
         self.check_address_space(addr)?;
         self.check_write_address_space(addr)?;
 
@@ -264,32 +268,32 @@ mod tests {
         let mem_len = memory.stack.len();
         memory.stack[mem_len - 1] = 10;
         memory.stack[mem_len - 2] = 20;
-        assert_eq!(memory.read::<u8>(-1i32 as u32), 10);
-        assert_eq!(memory.read_bytes(-2i32 as u32, 2), &[20, 10]);
+        assert_eq!(memory.read::<u8>(-1i32 as u32).unwrap(), 10);
+        assert_eq!(memory.read_bytes(-2i32 as u32, 2).unwrap(), &[20, 10]);
         memory.stack[mem_len - 1] = 0x10;
         memory.stack[mem_len - 2] = 0x20;
-        assert_eq!(memory.read::<u16>(-2i32 as u32), 0x1020);
+        assert_eq!(memory.read::<u16>(-2i32 as u32).unwrap(), 0x1020);
     }
 
     #[test]
     fn test_writing_memory() {
         let mut memory = init_memory();
         memory.write(-4i32 as u32, 600u32).unwrap();
-        assert_eq!(memory.read::<u32>(-4i32 as u32), 600);
+        assert_eq!(memory.read::<u32>(-4i32 as u32).unwrap(), 600);
         memory.write(-8i32 as u32, 0x12345678u32).unwrap();
         assert_eq!(
-            memory.read_bytes(-8i32 as u32, 4),
+            memory.read_bytes(-8i32 as u32, 4).unwrap(),
             &[0x78, 0x56, 0x34, 0x12]
         );
 
         memory.write(-8i32 as u32, 0xABCDu16).unwrap();
         assert_eq!(
-            memory.read_bytes(-8i32 as u32, 4),
+            memory.read_bytes(-8i32 as u32, 4).unwrap(),
             &[0xCD, 0xAB, 0x34, 0x12]
         );
 
         let arr = [1u8, 2, 3, 4];
         memory.write_slice(-4i32 as u32, arr.as_ref()).unwrap();
-        assert_eq!(memory.read::<u32>(-4i32 as u32), 0x04030201);
+        assert_eq!(memory.read::<u32>(-4i32 as u32).unwrap(), 0x04030201);
     }
 }

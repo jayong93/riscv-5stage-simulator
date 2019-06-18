@@ -35,7 +35,7 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
         if self.cur_head == self.cur_tail {
             return None;
         }
-        let idx = self.index_queue.get(self.cur_tail-1).unwrap();
+        let idx = self.index_queue.get(self.cur_tail - 1).unwrap();
         self.cur_tail -= 1;
         let raw_idx = *self.index_map.get(&idx).unwrap();
         self.buf.get(raw_idx)

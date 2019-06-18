@@ -1,3 +1,4 @@
+use super::exception::Exception;
 use super::functional_units as fu;
 use super::load_buffer::LoadBuffer;
 use super::operand::Operand;
@@ -197,6 +198,7 @@ impl ReservationStation {
                 .map(|entry| FinishedCalc {
                     rob_idx: entry.rob_index,
                     reg_value: entry.value,
+                    exception: None,
                 })
                 .collect()
         };
@@ -219,4 +221,5 @@ impl ReservationStation {
 pub struct FinishedCalc {
     pub rob_idx: usize,
     pub reg_value: u32,
+    pub exception: Option<Exception>,
 }

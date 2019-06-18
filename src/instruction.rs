@@ -69,11 +69,21 @@ pub struct Fields {
 impl std::fmt::Display for Fields {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "[ ")?;
-        if let Some(rs1) = self.rs1 { write!(f, "rs1: {}, ", rs1)?; }
-        if let Some(rs2) = self.rs2 { write!(f, "rs2: {}, ", rs2)?; }
-        if let Some(rs3) = self.rs3 { write!(f, "rs3: {}, ", rs3)?; }
-        if let Some(rd) = self.rd { write!(f, "rd: {}, ", rd)?; }
-        if let Some(imm) = self.imm { write!(f, "imm: {:x}, ", imm)?; }
+        if let Some(rs1) = self.rs1 {
+            write!(f, "rs1: {}, ", rs1)?;
+        }
+        if let Some(rs2) = self.rs2 {
+            write!(f, "rs2: {}, ", rs2)?;
+        }
+        if let Some(rs3) = self.rs3 {
+            write!(f, "rs3: {}, ", rs3)?;
+        }
+        if let Some(rd) = self.rd {
+            write!(f, "rd: {}, ", rd)?;
+        }
+        if let Some(imm) = self.imm {
+            write!(f, "imm: {:x}, ", imm)?;
+        }
         write!(f, "]")
     }
 }

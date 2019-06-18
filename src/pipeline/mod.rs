@@ -1,23 +1,19 @@
 //! Pipeline definition.
 
 pub mod branch_predictor;
+pub mod exception;
 pub mod functional_units;
 pub mod load_buffer;
 pub mod operand;
 pub mod reorder_buffer;
 pub mod reservation_staion;
 
+use self::exception::Exception;
 use self::reorder_buffer::ReorderBufferEntry;
 use consts;
 use instruction::Function;
 use memory;
 use register;
-
-#[derive(Debug, Clone)]
-pub enum SyscallError {
-    NotImpl(u32),
-    Error(String),
-}
 
 /// Pipeline holding four inter-stage registers
 #[derive(Debug)]
@@ -54,17 +50,21 @@ impl Pipeline {
     pub fn system_call(
         memory: &mut memory::ProcessMemory,
         reg: &mut register::RegisterFile,
-    ) -> Result<(), SyscallError> {
-        let result: Result<u32, SyscallError> = match reg.gpr[consts::SYSCALL_NUM_REG].read() {
+    ) -> Result<(), Exception> {
+        let syscall_num = reg.gpr[consts::SYSCALL_NUM_REG].read();
+        let calling_exception = |_| Exception::FailCallingSyscall(syscall_num);
+        let result: Result<u32, Exception> = match syscall_num {
             64 => {
                 let fd = reg.gpr[consts::SYSCALL_ARG1_REG].read() as i32;
                 let buf_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let count = reg.gpr[consts::SYSCALL_ARG3_REG].read();
-                let bytes = memory.read_bytes(buf_addr, count as usize);
-
-                nix::unistd::write(fd, bytes)
-                    .map(|n| n as u32)
-                    .map_err(|err| SyscallError::Error(format!("{}", err)))
+                memory
+                    .read_bytes(buf_addr, count as usize)
+                    .and_then(|bytes| {
+                        nix::unistd::write(fd, bytes)
+                            .map(|n| n as u32)
+                            .map_err(calling_exception)
+                    })
             }
             78 => {
                 let buf_addr = reg.gpr[consts::SYSCALL_ARG3_REG].read();
@@ -72,15 +72,16 @@ impl Pipeline {
                 let path_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let fd = reg.gpr[consts::SYSCALL_ARG1_REG].read();
 
-                let path_addr = memory.read_bytes(path_addr, 1).as_ptr() as *const i8;
+                let path_addr = memory.read_bytes(path_addr, 1).unwrap().as_ptr() as *const i8;
                 let path_str = unsafe { std::ffi::CStr::from_ptr(path_addr) }
                     .to_str()
                     .expect("Can't convert bytes to str");
-                let buf = memory.read_bytes_mut(buf_addr, buf_size as usize);
-                nix::fcntl::readlinkat(fd as i32, path_str, buf)
-                    .map(|s| s.len() as u32)
-                    .map_err(|_| {
-                        SyscallError::Error("Can't call readlinkat system call".to_string())
+                memory
+                    .read_bytes_mut(buf_addr, buf_size as usize)
+                    .and_then(|buf| {
+                        nix::fcntl::readlinkat(fd as i32, path_str, buf)
+                            .map(|s| s.len() as u32)
+                            .map_err(calling_exception)
                     })
             }
             80 => {
@@ -88,17 +89,11 @@ impl Pipeline {
                 let buf_addr = reg.gpr[consts::SYSCALL_ARG2_REG].read();
                 let stat = nix::sys::stat::fstat(fd as i32).unwrap();
 
-                memory
-                    .write(buf_addr, stat)
-                    .map(|_| 0)
-                    .map_err(|s| SyscallError::Error(s))
+                memory.write(buf_addr, stat).map(|_| 0)
             }
             160 => {
                 let addr = reg.gpr[consts::SYSCALL_ARG1_REG].read();
-                memory
-                    .write(addr, nix::sys::utsname::uname())
-                    .map(|_| 0)
-                    .map_err(|s| SyscallError::Error(s))
+                memory.write(addr, nix::sys::utsname::uname()).map(|_| 0)
             }
             174 => Ok(nix::unistd::getuid().as_raw()),
             175 => Ok(nix::unistd::geteuid().as_raw()),
@@ -114,9 +109,7 @@ impl Pipeline {
                 Ok(addr)
             }
             93 | 94 => Ok(0),
-            _ => Err(SyscallError::NotImpl(
-                reg.gpr[crate::consts::SYSCALL_NUM_REG].read(),
-            )),
+            _ => Err(Exception::FailCallingSyscall(syscall_num)),
         };
         result.map(|ret_val| {
             reg.gpr[consts::SYSCALL_RET_REG].write(ret_val);
@@ -133,15 +126,20 @@ impl Pipeline {
                 let should_cancel = entry.retire(*old_idx, &mut self.memory, &mut self.reg);
 
                 if let Opcode::Branch = entry.inst.opcode {
-                    self.branch_predictor.update(entry.pc, entry.reg_value.unwrap());
+                    self.branch_predictor
+                        .update(entry.pc, entry.reg_value.unwrap());
                 }
 
-                if unsafe{crate::PRINT_STEPS} {
+                if unsafe { crate::PRINT_STEPS } {
                     eprint!(
                         "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
-                        self.clock, entry.pc, entry.inst.value, entry.inst.function, entry.inst.fields,
+                        self.clock,
+                        entry.pc,
+                        entry.inst.value,
+                        entry.inst.function,
+                        entry.inst.fields,
                     );
-                    if unsafe{crate::PRINT_DEBUG_INFO} {
+                    if unsafe { crate::PRINT_DEBUG_INFO } {
                         eprint!(" | regs: {}", self.reg);
                     }
                     eprintln!("");
@@ -217,7 +215,7 @@ impl Pipeline {
 
         for _ in 0..2 {
             let pc = self.reg.pc.read();
-            let raw_inst = self.memory.read_inst(pc);
+            let raw_inst = self.memory.read_inst(pc).unwrap();
             let mut inst = Instruction::new(raw_inst);
             if let Opcode::Fmadd
             | Opcode::Fmsub
@@ -250,7 +248,7 @@ impl Pipeline {
             self.reg.pc.write(npc);
 
             let inst_rd = inst.fields.rd.unwrap_or(0);
-            let rob_idx = self.rob.issue(pc, inst, &self.reg);
+            let rob_idx = self.rob.issue(pc, inst, &self.reg, &mut self.branch_predictor);
             self.rs.issue(rob_idx, &self.rob, &self.reg);
             self.reg.set_reg_rob_index(inst_rd, rob_idx);
 

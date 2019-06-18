@@ -2,9 +2,8 @@
 pub enum Operand {
     Value(u32),
     Rob(usize),
-    None
+    None,
 }
-
 
 impl Default for Operand {
     fn default() -> Self {

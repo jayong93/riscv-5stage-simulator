@@ -1,16 +1,16 @@
 //! A 5-stage pipelining RISC-V 32I simulator.
 
+extern crate lazy_static;
 extern crate riscv_5stage_simulator;
 extern crate structopt;
-extern crate lazy_static;
 
+use lazy_static::lazy_static;
 use riscv_5stage_simulator::memory::ProcessMemory;
 use riscv_5stage_simulator::pipeline::Pipeline;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use lazy_static::lazy_static;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "casim")]
@@ -30,8 +30,8 @@ lazy_static! {
 }
 
 fn main() {
-    unsafe{ riscv_5stage_simulator::PRINT_DEBUG_INFO = OPTS.print_debug_info };
-    unsafe{ riscv_5stage_simulator::PRINT_STEPS = OPTS.print_steps };
+    unsafe { riscv_5stage_simulator::PRINT_DEBUG_INFO = OPTS.print_debug_info };
+    unsafe { riscv_5stage_simulator::PRINT_STEPS = OPTS.print_steps };
 
     let mut f_data = Vec::new();
     let process_image;

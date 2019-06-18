@@ -1,6 +1,5 @@
 //! Global constants
 
-
 /// Special simulator-only instruction signal to halt simulator.
 pub const HALT: u32 = 0x3f;
 

@@ -3,6 +3,7 @@ use super::reorder_buffer::ReorderBuffer;
 use super::reservation_staion::FinishedCalc;
 use instruction::Opcode;
 use memory::ProcessMemory;
+use pipeline::exception::Exception;
 use pipeline::functional_units::memory::MemoryUnit;
 use register::RegisterFile;
 use std::collections::HashMap;
@@ -20,7 +21,7 @@ pub struct LoadBufferEntry {
     pub status: LoadBufferStatus,
     pub base: Operand,
     pub addr: u32, // initially has imm value.
-    pub value: u32,
+    pub value: Result<u32, Exception>,
 }
 
 impl LoadBufferEntry {
@@ -55,7 +56,7 @@ impl LoadBuffer {
                         status: LoadBufferStatus::Wait,
                         base: reg.get_reg_value(inst.fields.rs1.unwrap(), rob),
                         addr: inst.fields.imm.unwrap_or(0),
-                        value: 0,
+                        value: Ok(0),
                     },
                 );
             }
@@ -80,7 +81,8 @@ impl LoadBuffer {
             .map(|idx| self.buf.remove(&idx).unwrap())
             .map(|entry| FinishedCalc {
                 rob_idx: entry.rob_index,
-                reg_value: entry.value,
+                reg_value: entry.value.unwrap_or(0),
+                exception: entry.value.err(),
             })
             .collect()
     }

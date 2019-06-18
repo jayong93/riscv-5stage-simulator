@@ -2,13 +2,16 @@ pub mod iter;
 use super::operand::Operand;
 use instruction::{Function, Instruction, Opcode};
 use memory::ProcessMemory;
+use pipeline::branch_predictor::BranchPredictor;
 use pipeline::reservation_staion::FinishedCalc;
 use pipeline::Pipeline;
 use register::RegisterFile;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
+use pipeline::exception::Exception;
 
-#[derive(Debug, Default, Clone)]
+
+#[derive(Debug, Clone)]
 pub struct ReorderBufferEntry {
     pub pc: u32,
     pub inst: Instruction,
@@ -18,6 +21,7 @@ pub struct ReorderBufferEntry {
     pub addr: Operand,
     pub branch_pred: bool,
     pub mem_rem_cycle: usize,
+    pub mem_exception: Result<(), Exception>,
 }
 
 impl ReorderBufferEntry {
@@ -49,6 +53,8 @@ impl ReorderBufferEntry {
         memory: &mut ProcessMemory,
         reg: &mut RegisterFile,
     ) -> bool {
+        self.mem_exception.unwrap();
+
         if let Opcode::Branch = self.inst.opcode {
             if let Some(branch_result) = self.reg_value {
                 if branch_result == self.branch_pred as u32 {
@@ -88,7 +94,9 @@ pub struct ReorderBuffer {
 impl std::fmt::Display for ReorderBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "[\n")?;
-        self.iter_with_id().for_each(|entry| {write!(f, "{:?}\n", entry).unwrap();});
+        self.iter_with_id().for_each(|entry| {
+            write!(f, "{:?}\n", entry).unwrap();
+        });
         write!(f, "]")
     }
 }
@@ -146,6 +154,7 @@ impl ReorderBuffer {
         pc: u32,
         inst: Instruction,
         reg: &crate::register::RegisterFile,
+        branch_predictor: &mut BranchPredictor,
     ) -> usize {
         let (mem_value, addr) = match inst.opcode {
             Opcode::Store => (
@@ -158,14 +167,12 @@ impl ReorderBuffer {
             ),
             _ => (Operand::default(), Operand::default()),
         };
-        // let reg_value = match inst.opcode {
-        //     Opcode::Jal | Opcode::Jalr => Some(pc + crate::consts::WORD_SIZE as u32),
-        //     Opcode::Lui => Some(inst.fields.imm.unwrap()),
-        //     Opcode::AuiPc => Some(pc + inst.fields.imm.unwrap()),
-        //     Opcode::Amo if inst.function == Function::Scw => Some(0),
-        //     _ => None,
-        // };
         let rd = inst.fields.rd.unwrap_or(0);
+        let branch_pred = if let Opcode::Branch = inst.opcode {
+            branch_predictor.predict(pc)
+        } else {
+            false
+        };
         let new_entry = ReorderBufferEntry {
             pc,
             inst,
@@ -173,8 +180,9 @@ impl ReorderBuffer {
             mem_value,
             rd,
             addr,
-            branch_pred: false,
+            branch_pred,
             mem_rem_cycle: crate::consts::MEM_CYCLE,
+            mem_exception: Ok(()),
         };
 
         self.add(new_entry)
@@ -221,9 +229,11 @@ impl ReorderBuffer {
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
         for (idx, entry) in self.buf.iter_mut() {
-
             if *idx == job.rob_idx {
                 entry.reg_value = Some(job.reg_value);
+                if let Some(exception) = job.exception {
+                    entry.mem_exception = Err(exception);
+                }
                 continue;
             }
 

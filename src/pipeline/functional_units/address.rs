@@ -19,7 +19,13 @@ impl AddressUnit {
     pub fn clear(&mut self) {
         self.buf.clear()
     }
-    pub fn issue(&mut self, rob_idx: usize, inst: Instruction, reg: &RegisterFile, rob: &ReorderBuffer) {
+    pub fn issue(
+        &mut self,
+        rob_idx: usize,
+        inst: Instruction,
+        reg: &RegisterFile,
+        rob: &ReorderBuffer,
+    ) {
         let rs1 = inst.fields.rs1.unwrap();
         let imm = inst.fields.imm.unwrap_or(0);
         let entry = RSEntry {
