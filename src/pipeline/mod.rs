@@ -130,19 +130,21 @@ impl Pipeline {
                         .update(entry.pc, entry.reg_value.unwrap());
                 }
 
-                if unsafe { crate::PRINT_STEPS } {
-                    eprint!(
-                        "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
-                        self.clock,
-                        entry.pc,
-                        entry.inst.value,
-                        entry.inst.function,
-                        entry.inst.fields,
-                    );
-                    if unsafe { crate::PRINT_DEBUG_INFO } {
-                        eprint!(" | regs: {}", self.reg);
+                if !entry.inst.is_nop() {
+                    if unsafe { crate::PRINT_STEPS } {
+                        eprint!(
+                            "Clock #{} | pc: {:x} | val: {:08x} | inst: {:?} | fields: {}",
+                            self.clock,
+                            entry.pc,
+                            entry.inst.value,
+                            entry.inst.function,
+                            entry.inst.fields,
+                        );
+                        if unsafe { crate::PRINT_DEBUG_INFO } {
+                            eprint!(" | regs: {}", self.reg);
+                        }
+                        eprintln!("");
                     }
-                    eprintln!("");
                 }
 
                 if should_cancel {
@@ -248,7 +250,9 @@ impl Pipeline {
             self.reg.pc.write(npc);
 
             let inst_rd = inst.fields.rd.unwrap_or(0);
-            let rob_idx = self.rob.issue(pc, inst, &self.reg, &mut self.branch_predictor);
+            let rob_idx = self
+                .rob
+                .issue(pc, inst, &self.reg, &mut self.branch_predictor);
             self.rs.issue(rob_idx, &self.rob, &self.reg);
             self.reg.set_reg_rob_index(inst_rd, rob_idx);
 
