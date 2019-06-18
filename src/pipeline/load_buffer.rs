@@ -80,10 +80,12 @@ impl LoadBuffer {
         }
 
         let rob_entry = rob.get(load.rob_index).unwrap();
-        let mut my_addr = 0;
-        if let Operand::Value(target_addr) = rob_entry.addr {
-            my_addr = target_addr;
+        let my_addr = if let Operand::Value(target_addr) = rob_entry.addr {
+            Some(target_addr)
         } else {
+            None
+        };
+        if my_addr.is_none() {
             return false;
         }
 
@@ -101,7 +103,7 @@ impl LoadBuffer {
                 Opcode::Store | Opcode::Amo if entry.inst.function != Function::Lrw => {
                     match entry.addr {
                         Operand::Rob(_) => true,
-                        Operand::Value(addr) if addr == my_addr => true,
+                        Operand::Value(addr) if addr == my_addr.unwrap() => true,
                         _ => false,
                     }
                 }
