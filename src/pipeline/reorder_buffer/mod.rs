@@ -6,7 +6,7 @@ use pipeline::branch_predictor::BranchPredictor;
 use pipeline::reservation_staion::FinishedCalc;
 use pipeline::Pipeline;
 use register::RegisterFile;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, LinkedList};
 use std::fmt::Debug;
 use pipeline::exception::Exception;
 
@@ -84,11 +84,12 @@ impl ReorderBufferEntry {
 
 #[derive(Debug, Default)]
 pub struct ReorderBuffer {
-    highst_index: usize,
-    unused_indies: VecDeque<usize>,
-    index_queue: VecDeque<usize>,
-    index_map: HashMap<usize, usize>,
-    buf: Vec<(usize, ReorderBufferEntry)>,
+    // highst_index: usize,
+    // unused_indies: VecDeque<usize>,
+    // index_queue: VecDeque<usize>,
+    // index_map: HashMap<usize, usize>,
+    // buf: Vec<(usize, ReorderBufferEntry)>,
+    buf: LinkedList<ReorderBufferEntry>,
 }
 
 impl std::fmt::Display for ReorderBuffer {
@@ -103,51 +104,53 @@ impl std::fmt::Display for ReorderBuffer {
 
 impl ReorderBuffer {
     pub fn clear(&mut self) {
-        self.highst_index = 0;
-        self.unused_indies.clear();
-        self.index_map.clear();
-        self.index_queue.clear();
+        // self.highst_index = 0;
+        // self.unused_indies.clear();
+        // self.index_map.clear();
+        // self.index_queue.clear();
         self.buf.clear();
     }
 
-    fn register_new_index(&mut self) -> usize {
-        self.unused_indies.pop_front().unwrap_or_else(|| {
-            let new_index = self.highst_index;
-            self.highst_index += 1;
-            new_index
-        })
-    }
+    // fn register_new_index(&mut self) -> usize {
+    //     self.unused_indies.pop_front().unwrap_or_else(|| {
+    //         let new_index = self.highst_index;
+    //         self.highst_index += 1;
+    //         new_index
+    //     })
+    // }
 
     fn add(&mut self, entry: ReorderBufferEntry) -> usize {
-        let index = self.register_new_index();
-        self.index_queue.push_back(index);
-        self.buf.push((index, entry));
-        self.index_map.insert(index, self.buf.len() - 1);
-        index
+        // let index = self.register_new_index();
+        // self.index_queue.push_back(index);
+        // self.buf.push((index, entry));
+        // self.index_map.insert(index, self.buf.len() - 1);
+        self.buf.push_back(entry);
+        self.buf.back().unwrap() as *const ReorderBufferEntry as usize
     }
 
     pub fn pop_front(&mut self) -> Option<ReorderBufferEntry> {
-        if self.buf.is_empty() {
-            return None;
-        }
+        // if self.buf.is_empty() {
+        //     return None;
+        // }
 
-        let index = self.index_queue.pop_front().unwrap();
-        if let Some(raw_idx_to_remove) = self.index_map.remove(&index) {
-            let last_idx;
-            {
-                let (idx, _) = self.buf.last().unwrap();
-                last_idx = *idx;
-            }
-            let (_, removed_entry) = self.buf.swap_remove(raw_idx_to_remove);
-            if let Some(last_raw_idx) = self.index_map.get_mut(&last_idx) {
-                *last_raw_idx = raw_idx_to_remove;
-            }
-            self.unused_indies.push_back(index);
+        // let index = self.index_queue.pop_front().unwrap();
+        // if let Some(raw_idx_to_remove) = self.index_map.remove(&index) {
+        //     let last_idx;
+        //     {
+        //         let (idx, _) = self.buf.last().unwrap();
+        //         last_idx = *idx;
+        //     }
+        //     let (_, removed_entry) = self.buf.swap_remove(raw_idx_to_remove);
+        //     if let Some(last_raw_idx) = self.index_map.get_mut(&last_idx) {
+        //         *last_raw_idx = raw_idx_to_remove;
+        //     }
+        //     self.unused_indies.push_back(index);
 
-            Some(removed_entry)
-        } else {
-            None
-        }
+        //     Some(removed_entry)
+        // } else {
+        //     None
+        // }
+        self.buf.pop_front()
     }
 
     pub fn issue(
@@ -194,43 +197,52 @@ impl ReorderBuffer {
     }
 
     pub fn get(&self, index: usize) -> Option<&ReorderBufferEntry> {
-        self.index_map
-            .get(&index)
-            .and_then(|&raw_idx| self.buf.get(raw_idx))
-            .map(|(_, entry)| entry)
+        // self.index_map
+        //     .get(&index)
+        //     .and_then(|&raw_idx| self.buf.get(raw_idx))
+        //     .map(|(_, entry)| entry)
+        unsafe{
+            Some(&(*(index as *const ReorderBufferEntry)))
+        }
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut ReorderBufferEntry> {
-        if let Some(raw_idx) = self.index_map.get(&index) {
-            self.buf.get_mut(*raw_idx).map(|(_, entry)| entry)
-        } else {
-            None
+        // if let Some(raw_idx) = self.index_map.get(&index) {
+        //     self.buf.get_mut(*raw_idx).map(|(_, entry)| entry)
+        // } else {
+        //     None
+        // }
+        unsafe{
+            Some(&mut (*(index as *mut ReorderBufferEntry)))
         }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ReorderBufferEntry> + DoubleEndedIterator + Debug {
-        self.iter_with_id().map(|pair| &pair.1)
+        self.iter_with_id().map(|pair| pair.1)
     }
 
     pub fn nth_index(&self, n: usize) -> Option<usize> {
-        self.index_queue.get(n).map(|idx| *idx)
+        // self.index_queue.get(n).map(|idx| *idx)
+        self.buf.iter().nth(n).map(|e| e as *const ReorderBufferEntry as usize)
     }
 
     pub fn iter_with_id(
         &self,
-    ) -> impl Iterator<Item = &(usize, ReorderBufferEntry)> + DoubleEndedIterator + Debug {
-        iter::Iter {
-            index_map: &self.index_map,
-            index_queue: &self.index_queue,
-            buf: &self.buf,
-            cur_head: 0,
-            cur_tail: self.index_queue.len(),
-        }
+    ) -> impl Iterator<Item = (usize, &ReorderBufferEntry)> + DoubleEndedIterator + Debug {
+        // iter::Iter {
+        //     index_map: &self.index_map,
+        //     index_queue: &self.index_queue,
+        //     buf: &self.buf,
+        //     cur_head: 0,
+        //     cur_tail: self.index_queue.len(),
+        // }
+        self.buf.iter().map(|e| (e as *const ReorderBufferEntry as usize, e))
     }
 
     pub fn propagate(&mut self, job: &FinishedCalc) {
-        for (idx, entry) in self.buf.iter_mut() {
-            if *idx == job.rob_idx {
+        for entry in self.buf.iter_mut() {
+            let idx = entry as *const ReorderBufferEntry as usize;
+            if idx == job.rob_idx {
                 entry.reg_value = Some(job.reg_value);
                 if let Some(exception) = job.exception {
                     entry.mem_exception = Err(exception);
@@ -254,7 +266,7 @@ impl ReorderBuffer {
         let completed: Vec<_> = self
             .iter_with_id()
             .take_while(|(_, entry)| entry.is_completed())
-            .map(|(idx, _)| *idx)
+            .map(|(idx, _)| idx)
             .collect();
 
         completed
