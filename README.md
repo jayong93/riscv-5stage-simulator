@@ -34,6 +34,6 @@ Organization and Design RISC-V Edition by Patterson and Hennessy.
 
 ## Licence
 
-Copyright 2017 Douglas Anderson <douglas.anderson-1@colorado.edu>. Released
+Copyright 2017 Douglas Anderson <douglas.anderson-1@colorado.edu>, Jaeyong Choi <jayong93@gmail.com>. Released
 under GPL 3 _except for the 3 disassembly files in tests/ which are copyright
 their respective authors and not covered under this license._
